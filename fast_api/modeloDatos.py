@@ -29,3 +29,11 @@ class RecursoCompartir(BaseModel):
 class AlbumRecurso(BaseModel):
     id_album: int
     id_recurso: int
+
+class RespuestaInvitacionAlbum(BaseModel):
+    id_album: int
+    id_persona_invitadora: int
+
+class RespuestaPeticionRecurso(BaseModel):
+    id_recurso: int
+    id_persona_emisora: int

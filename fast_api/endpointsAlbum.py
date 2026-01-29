@@ -57,3 +57,29 @@ def salir_album(id_album: int, current_user_id: int = Depends(funcionesSeguridad
     if not exito:
         raise HTTPException(status_code=400, detail=str(res))
     return {"mensaje": res}
+
+#~Endpoint para ver invitaciones pendientes de album
+@router.get("/album/invitaciones")
+def ver_invitaciones_album(current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+    exito, res = consultasAlbum.ver_peticiones_pendientes_album(current_user_id)
+    if not exito:
+        raise HTTPException(status_code=400, detail=str(res))
+    return res
+
+#~Endpoint para aceptar invitacion
+@router.post("/album/invitacion/aceptar")
+def aceptar_invitacion_album(datos: modeloDatos.RespuestaInvitacionAlbum, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+    # Nota: id_persona_invitadora es quien mandó la solicitud
+    # current_user_id es quien la acepta
+    exito, res = consultasAlbum.aceptar_peticion_album(datos.id_persona_invitadora, current_user_id, datos.id_album)
+    if not exito:
+        raise HTTPException(status_code=400, detail=str(res))
+    return {"mensaje": res}
+
+#~Endpoint para rechazar invitacion
+@router.post("/album/invitacion/rechazar")
+def rechazar_invitacion_album(datos: modeloDatos.RespuestaInvitacionAlbum, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+    exito, res = consultasAlbum.rechazar_peticion_album(datos.id_persona_invitadora, current_user_id, datos.id_album)
+    if not exito:
+        raise HTTPException(status_code=400, detail=str(res))
+    return {"mensaje": res}

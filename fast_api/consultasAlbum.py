@@ -49,32 +49,39 @@ def peticion_album(id_persona: int, id_persona_compartida: int, id_album:int, ro
             if 'cursor' in locals(): cursor.close()
             connection.close()
 
-def aceptar_peticion_album(id_persona: int, id_persona_compartida: int, id_album: int, rol:str):
+def aceptar_peticion_album(id_persona_invitadora: int, id_usuario_aceptando: int, id_album: int):
     connection = None
     try:
         connection = db.get_connection()
         connection.autocommit = False
-        if connection.is_connected():
-            cursor = connection.cursor()
-            query_1 = "DELETE FROM Peticion_Album WHERE id_persona=%s AND id_persona_compartida=%s AND id_album=%s;"
-            query_2 = "INSERT INTO Miembro_Album (id_album, id_persona, rol) VALUES (%s, %s, %s);"
-            valores = (id_persona, id_persona_compartida, id_album)
-            cursor.execute(query_1, valores)
-            if cursor.rowcount == 0:
-                connection.rollback()
-                return (False, "No se ha encontrado la petición para entrar al album")
-            valores = (id_album, id_persona_compartida, rol)
-            cursor.execute(query_2, valores)
-            connection.commit()
-            return (True, id_album)
-    except Error as e:
-        if connection and connection.is_connected():
-            connection.rollback()
-        print(f"Error en guardar persona en MySql: {e}")
-        return (False,e)
+        cursor = connection.cursor()
+        
+        # 1. Obtenemos el ROL original de la invitación (Seguridad)
+        query_check = "SELECT rol FROM Peticion_Album WHERE id_persona=%s AND id_persona_compartida=%s AND id_album=%s"
+        cursor.execute(query_check, (id_persona_invitadora, id_usuario_aceptando, id_album))
+        resultado = cursor.fetchone()
+        
+        if not resultado:
+            return (False, "No existe invitación pendiente para este álbum de esta persona")
+        
+        rol_asignado = resultado[0]
+
+        # 2. Borramos la petición
+        query_delete = "DELETE FROM Peticion_Album WHERE id_persona=%s AND id_persona_compartida=%s AND id_album=%s;"
+        cursor.execute(query_delete, (id_persona_invitadora, id_usuario_aceptando, id_album))
+
+        # 3. Insertamos al miembro con el rol que tenía asignado
+        query_insert = "INSERT INTO Miembro_Album (id_album, id_persona, rol) VALUES (%s, %s, %s);"
+        cursor.execute(query_insert, (id_album, id_usuario_aceptando, rol_asignado))
+        
+        connection.commit()
+        return (True, "Invitación aceptada correctamente")
+    except Exception as e:
+        if connection: connection.rollback()
+        return (False, str(e))
     finally:
-        if connection is not None and connection.is_connected():
-            if 'cursor' in locals(): cursor.close()
+        if connection and connection.is_connected():
+            cursor.close()
             connection.close()
 
 def add_recurso_album(id_recurso:int, id_album:int, id_persona:int):
@@ -255,6 +262,51 @@ def ver_miembros_album(id_album: int):
         return (True, cursor.fetchall())
     except Error as e:
         return (False, e)
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+def ver_peticiones_pendientes_album(id_persona: int):
+    connection = None
+    try:
+        connection = db.get_connection()
+        cursor = connection.cursor(dictionary=True)
+        # Obtenemos nombre del álbum y nombre de quien invita
+        query = """
+            SELECT PA.id_album, A.nombre as nombre_album, 
+                   PA.id_persona as id_invitador, P.nombre as nombre_invitador, 
+                   PA.rol, PA.id_persona_compartida
+            FROM Peticion_Album PA
+            JOIN Album A ON PA.id_album = A.id
+            JOIN Persona P ON PA.id_persona = P.id
+            WHERE PA.id_persona_compartida = %s
+        """
+        cursor.execute(query, (id_persona,))
+        return (True, cursor.fetchall())
+    except Exception as e:
+        return (False, str(e))
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+def rechazar_peticion_album(id_persona_invitadora: int, id_usuario_rechazando: int, id_album: int):
+    connection = None
+    try:
+        connection = db.get_connection()
+        cursor = connection.cursor()
+        
+        query = "DELETE FROM Peticion_Album WHERE id_persona=%s AND id_persona_compartida=%s AND id_album=%s"
+        cursor.execute(query, (id_persona_invitadora, id_usuario_rechazando, id_album))
+        
+        if cursor.rowcount == 0:
+            return (False, "No se encontró la invitación")
+            
+        connection.commit()
+        return (True, "Invitación rechazada")
+    except Exception as e:
+        return (False, str(e))
     finally:
         if connection and connection.is_connected():
             cursor.close()

@@ -70,3 +70,20 @@ def listar_amigos(current_user_id: int = Depends(funcionesSeguridad.get_current_
     exito, amigos = consultasPersona.ver_amigos(current_user_id)
     if not exito: raise HTTPException(status_code=400, detail=str(amigos))
     return amigos
+
+#~Endpoint para rechazar una solicitud de amistad
+@router.post("/amigos/rechazar")
+def rechazar_solicitud_amistad(datos: modeloDatos.AmigoRequest, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+    # id_persona_objetivo es la persona que te envió la solicitud (y que quieres rechazar)
+    exito, resultado = consultasPersona.rechazar_amistad(current_user_id, datos.id_persona_objetivo)
+    if not exito:
+        raise HTTPException(status_code=400, detail=str(resultado))
+    return {"mensaje": resultado}
+
+#~Endpoint para eliminar a un amigo existente
+@router.delete("/amigos/eliminar/{id_amigo}")
+def eliminar_amigo(id_amigo: int, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+    exito, resultado = consultasPersona.eliminar_amigo(current_user_id, id_amigo)
+    if not exito:
+        raise HTTPException(status_code=400, detail=str(resultado))
+    return {"mensaje": resultado}
