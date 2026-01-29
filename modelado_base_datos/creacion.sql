@@ -9,6 +9,7 @@ DROP TABLE IF EXISTS Recurso_Persona;
 DROP TABLE IF EXISTS Recurso;
 DROP TABLE IF EXISTS Album;
 DROP TABLE IF EXISTS Persona;
+DROP TABLe IF EXISTS Control_Acceso;
 
 CREATE TABLE Persona(
 	id INT AUTO_INCREMENT,
@@ -104,6 +105,13 @@ CREATE TABLE Peticion_Recurso(
 	CONSTRAINT fk_peticion_recurso_recurso FOREIGN KEY(id_recurso) REFERENCES Recurso(id) ON DELETE CASCADE
 )ENGINE=InnoDB;
 
+CREATE TABLE Control_Acceso (
+    ip VARCHAR(45) NOT NULL,
+    intentos INT DEFAULT 0,
+    bloqueado_hasta DATETIME DEFAULT NULL,
+    ultimo_intento TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (ip)
+) ENGINE=InnoDB;
 
 DELIMITER //
 

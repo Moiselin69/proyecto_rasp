@@ -1,63 +1,37 @@
 import shutil
 import os
+import uuid
 from datetime import datetime
 from typing import List, Optional
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends
-from pydantic import BaseModel
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Request
 from passlib.context import CryptContext
-
-# Importamos tus módulos de base de datos
-# Asumiendo que están en la misma carpeta o el path es accesible
+from datetime import timedelta
+from jose import jwt
 import consultasPersona
 import consultasAlbum
 import consultasRecursos
-
+import consultasSeguridad
+from modeloDatos import PersonaRegistro, Login, PeticionAmistad, AlbumCrear, AlbumInvitacion, RecursoCompartir
 app = FastAPI(title="MoiselinCloud API")
 
-# --- CONFIGURACIÓN DE SEGURIDAD ---
+#~Funciones utilizadas para la seguridad
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
-
 def hashear_contra(contra: str) -> str:
     return pwd_context.hash(contra)
-
 def verificar_contra(contra_plana: str, contra_cifrada: str) -> bool:
     return pwd_context.verify(contra_plana, contra_cifrada)
-
-# --- MODELOS DE DATOS (PYDANTIC) ---
-# Estos definen qué JSON debe enviar la aplicación
-
-class PersonaRegistro(BaseModel):
-    nombre: str
-    apellidos: str
-    correo: str
-    contra: str
-
-class Login(BaseModel):
-    correo: str
-    contra: str
-
-class PeticionAmistad(BaseModel):
-    id_persona: int
-    id_persona_solicitada: int
-
-class AlbumCrear(BaseModel):
-    nombre: str
-    descripcion: str
-    id_persona: int # Creador
-
-class AlbumInvitacion(BaseModel):
-    id_persona: int # Quien invita
-    id_persona_compartida: int # A quien invitan
-    id_album: int
-    rol: str
-
-class RecursoCompartir(BaseModel):
-    id_persona: int
-    id_persona_compartida: int
-    id_recurso: int
+SECRET_KEY = os.getenv('SECRET_KEY')
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
+def crear_token_acceso(data: dict):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
 
 # --- ENDPOINTS: PERSONA ---
-
+#~Endpoint para registrar a una persona
 @app.post("/persona/registro")
 def registrar_usuario(usuario: PersonaRegistro):
     contra_hash = hashear_contra(usuario.contra)
@@ -68,18 +42,24 @@ def registrar_usuario(usuario: PersonaRegistro):
         raise HTTPException(status_code=400, detail=str(resultado))
     return {"mensaje": "Usuario creado", "id": resultado}
 
+#~Endpoint para loggear a una persona 
 @app.post("/persona/login")
-def login_usuario(datos: Login):
-    exito, usuario = consultasPersona.obtener_persona(datos.correo)
-    if not exito or not usuario:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
-    
-    # Verificar contraseña
-    if not verificar_contra(datos.contra, usuario['contra_hash']):
-        raise HTTPException(status_code=401, detail="Contraseña incorrecta")
-    
-    # En un sistema real, aquí devolverías un Token JWT
-    return {"mensaje": "Login exitoso", "usuario": usuario}
+def login_usuario(datos: Login, request: Request):
+    client_ip = request.client.host # obtenemos el io del cliente
+    puede_pasar, mensaje_bloqueo = consultasSeguridad.verificar_ip_bloqueada(client_ip) # verificamos si la ip está bloqueada
+    if not puede_pasar: # si está bloqueada lo detallamos en la respuesta
+        raise HTTPException(status_code=429, detail=mensaje_bloqueo) # 429 Too Many Requests
+    exito, usuario = consultasPersona.obtener_persona(datos.correo) # Aquí vericamos que la persona es quien dice ser
+    credenciales_validas = False # siempre vamos a dar por echo de primera que las credenciales están mal
+    if exito and usuario: # para así luego verificarlas y ver si están bien como aquí abajo
+        if verificar_contra(datos.contra, usuario['contra_hash']):
+            credenciales_validas = True
+    if not credenciales_validas:
+        consultasSeguridad.registrar_intento_fallido(client_ip) # Si hubo fallo en las credenciales lo registramos
+        raise HTTPException(status_code=401, detail="Credenciales incorrectas") # por motivos de seguridad no se específica el qué fallo
+    consultasSeguridad.limpiar_intentos(client_ip) # si el loggin consiguió ser exitoso borramos el historial de intentos
+    access_token = crear_token_acceso( data={"sub": str(usuario['id']), "correo": usuario['correo_electronico']})
+    return { "access_token": access_token, "token_type": "bearer"} # devolvemos el token para verificar al usuario cada vez que quiera hacer una accion
 
 @app.get("/persona/buscar")
 def buscar_personas(termino: str):
@@ -160,15 +140,20 @@ def invitar_a_album(invitacion: AlbumInvitacion):
 @app.post("/recurso/subir")
 async def subir_archivo(
     id_creador: int = Form(...),
-    tipo: str = Form(...), # IMAGEN, VIDEO, etc.
+    tipo: str = Form(...),
     file: UploadFile = File(...)
 ):
     # 1. Guardar el archivo físicamente en el servidor
     carpeta_destino = "static/uploads"
     os.makedirs(carpeta_destino, exist_ok=True)
     
-    # Generar nombre único para evitar sobreescritura (timestamp + nombre)
-    nombre_archivo = f"{int(datetime.now().timestamp())}_{file.filename}"
+    # Obtenemos la extensión del archivo original (ej: .jpg, .pdf)
+    nombre_original, extension = os.path.splitext(file.filename)
+    
+    # Generamos un UUID y le pegamos la extensión
+    nombre_archivo = f"{uuid.uuid4()}{extension}"
+    # -------------------
+
     ruta_completa = os.path.join(carpeta_destino, nombre_archivo)
     
     with open(ruta_completa, "wb") as buffer:
@@ -176,15 +161,15 @@ async def subir_archivo(
     
     # 2. Guardar en Base de Datos
     fecha_actual = datetime.now()
-    # Usamos ruta_completa o una URL relativa como enlace
     enlace_db = ruta_completa 
     
+    # Nota: Guardamos 'file.filename' (nombre original) en la BD para mostrarlo bonito al usuario,
+    # pero en el disco ('enlace_db') guardamos el UUID.
     exito, id_recurso = consultasRecursos.subir_recurso(
         id_creador, tipo, enlace_db, file.filename, fecha_actual
     )
     
     if not exito:
-        # Si falla la BD, borramos el archivo subido para no dejar basura
         os.remove(ruta_completa)
         raise HTTPException(status_code=500, detail=str(id_recurso))
         

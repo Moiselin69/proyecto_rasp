@@ -39,7 +39,6 @@ def obtener_persona(correo):
         connection = mysql.connector.connect(**config)
         if connection.is_connected():
             cursor = connection.cursor(dictionary=True)
-            # CORRECCIÓN: 'Persona' en lugar de 'PERSONA' por compatibilidad Linux
             query = "SELECT id, nombre, apellidos, contra_hash FROM Persona WHERE correo_electronico=%s"
             cursor.execute(query, (correo, ))
             return (True, cursor.fetchone())
