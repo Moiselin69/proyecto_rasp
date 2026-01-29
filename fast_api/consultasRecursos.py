@@ -2,6 +2,7 @@ import os
 import mysql.connector
 from mysql.connector import Error
 from datetime import datetime
+from typing import Optional
 from dotenv import load_dotenv
 load_dotenv()
 config = {
@@ -12,7 +13,7 @@ config = {
     'port': 3306
 }
 
-def subir_recurso(id_creador: int, tipo:str, enlace: str, nombre:str, fecha_real:datetime):
+def subir_recurso(id_creador: int, tipo: str, enlace: str, nombre: str, fecha_real: Optional[datetime] = None):
     connection = None
     try:
         connection = mysql.connector.connect(**config)

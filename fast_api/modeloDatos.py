@@ -10,22 +10,18 @@ class Login(BaseModel):
     correo: str
     contra: str
 
-class PeticionAmistad(BaseModel):
-    id_persona: int
-    id_persona_solicitada: int
+class AmigoRequest(BaseModel):
+    id_persona_objetivo: int 
 
 class AlbumCrear(BaseModel):
     nombre: str
     descripcion: str
-    id_persona: int # Creador
 
 class AlbumInvitacion(BaseModel):
-    id_persona: int # Quien invita
-    id_persona_compartida: int # A quien invitan
+    id_persona_invitada: int 
     id_album: int
     rol: str
 
 class RecursoCompartir(BaseModel):
-    id_persona: int
-    id_persona_compartida: int
+    id_persona_destino: int
     id_recurso: int
