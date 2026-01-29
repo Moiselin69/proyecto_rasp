@@ -1,20 +1,10 @@
-import os
-import mysql.connector
+import db
 from mysql.connector import Error
-from dotenv import load_dotenv
-load_dotenv()
-config = {
-    'user': os.getenv('DB_USER'),
-    'password': os.getenv('DB_PASSWORD'), 
-    'host': os.getenv('DB_HOST'),
-    'database': 'moiselincloud',
-    'port': 3306
-}
 
 def crear_album(nombre: str, descripcion:str, id_persona:int):
     connection = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         connection.autocommit = False
         if connection.is_connected():
             cursor = connection.cursor()
@@ -43,7 +33,7 @@ def crear_album(nombre: str, descripcion:str, id_persona:int):
 def peticion_album(id_persona: int, id_persona_compartida: int, id_album:int, rol:str):
     connection = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         if connection.is_connected():
             cursor = connection.cursor()
             query = "INSERT INTO Peticion_Album (id_persona, id_persona_compartida, id_album, rol) VALUES (%s, %s, %s, %s);"
@@ -62,7 +52,7 @@ def peticion_album(id_persona: int, id_persona_compartida: int, id_album:int, ro
 def aceptar_peticion_album(id_persona: int, id_persona_compartida: int, id_album: int, rol:str):
     connection = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         connection.autocommit = False
         if connection.is_connected():
             cursor = connection.cursor()
@@ -90,7 +80,7 @@ def aceptar_peticion_album(id_persona: int, id_persona_compartida: int, id_album
 def add_recurso_album(id_recurso:int, id_album:int, id_persona:int):
     connection = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         if connection.is_connected():
             cursor = connection.cursor()
             query_1 = "SELECT COUNT(*) FROM Recurso_Persona WHERE id_recurso=%s AND id_persona=%s;"
@@ -119,7 +109,7 @@ def add_recurso_album(id_recurso:int, id_album:int, id_persona:int):
 def borrar_recurso_album(id_recurso: int, id_album: int, id_persona:int):
     connection = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         if connection.is_connected():
             cursor = connection.cursor()
             query_1 = "SELECT COUNT(*) FROM Miembro_Album WHERE id_album=%s AND id_persona=%s AND (rol='CREADOR' OR rol='ADMINISTRADOR')"
@@ -143,7 +133,7 @@ def borrar_recurso_album(id_recurso: int, id_album: int, id_persona:int):
 def hacer_rol_album(id_persona:int, id_persona_implicada:int, id_album:int ,nuevo_rol:str):
     connection = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         if connection.is_connected():
             cursor = connection.cursor()
             query_1 = "SELECT rol FROM Miembro_Album WHERE id_album=%s AND id_persona=%s"
@@ -180,7 +170,7 @@ def hacer_rol_album(id_persona:int, id_persona_implicada:int, id_album:int ,nuev
 def obtener_albumes_usuario(id_persona: int):
     connection = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         cursor = connection.cursor(dictionary=True) # dictionary=True devuelve resultados como JSON/dict
         
         query = """
@@ -204,7 +194,7 @@ def obtener_recursos_album(id_album: int, id_persona: int):
     # id_persona se pide para verificar que tenga permiso de ver el album
     connection = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         cursor = connection.cursor(dictionary=True)
         
         # Primero verificamos si es miembro
@@ -232,7 +222,7 @@ def obtener_recursos_album(id_album: int, id_persona: int):
 def salir_de_album(id_album: int, id_persona: int):
     connection = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         cursor = connection.cursor()
         
         # Llamar al procedimiento almacenado
@@ -251,7 +241,7 @@ def salir_de_album(id_album: int, id_persona: int):
 def ver_miembros_album(id_album: int):
     connection = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         cursor = connection.cursor(dictionary=True)
         
         query = """

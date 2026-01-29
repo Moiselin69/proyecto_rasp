@@ -1,18 +1,6 @@
-import os
-import mysql.connector
+import db
 from mysql.connector import Error
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
-
-load_dotenv()
-
-config = {
-    'user': os.getenv('DB_USER'),
-    'password': os.getenv('DB_PASSWORD'), 
-    'host': os.getenv('DB_HOST'),
-    'database': 'moiselincloud',
-    'port': 3306
-}
 
 def verificar_ip_bloqueada(ip: str):
     """
@@ -21,7 +9,7 @@ def verificar_ip_bloqueada(ip: str):
     """
     connection = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         cursor = connection.cursor(dictionary=True)
         
         query = "SELECT intentos, bloqueado_hasta FROM Control_Acceso WHERE ip = %s"
@@ -61,7 +49,7 @@ def registrar_intento_fallido(ip: str):
     """
     connection = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         connection.autocommit = False
         cursor = connection.cursor()
         
@@ -100,7 +88,7 @@ def limpiar_intentos(ip: str):
     """
     connection = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         cursor = connection.cursor()
         query = "DELETE FROM Control_Acceso WHERE ip = %s"
         cursor.execute(query, (ip,))

@@ -1,13 +1,12 @@
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, status, Request
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi import APIRouter, HTTPException, Depends, Request
 import consultasPersona
 import consultasSeguridad
 import funcionesSeguridad
 import modeloDatos
-app = FastAPI(title="MoiselinCloud API")
+router = APIRouter()
 
 #~Endpoint para registrar una persona
-@app.post("/persona/registro")
+@router.post("/persona/registro")
 def registrar_usuario(usuario: modeloDatos.PersonaRegistro):
     contra_hash = funcionesSeguridad.hashear_contra(usuario.contra)
     exito, resultado = consultasPersona.guardar_persona(usuario.nombre, usuario.apellidos, usuario.correo, contra_hash)
@@ -16,7 +15,7 @@ def registrar_usuario(usuario: modeloDatos.PersonaRegistro):
     return {"mensaje": "Usuario creado", "id": resultado}
 
 #~Endpoint para loggear a una persona 
-@app.post("/persona/login")
+@router.post("/persona/login")
 def login_usuario(datos: modeloDatos.Login, request: Request):
     client_ip = request.client.host # obtenemos el io del cliente
     puede_pasar, mensaje_bloqueo = consultasSeguridad.verificar_ip_bloqueada(client_ip) # verificamos si la ip está bloqueada
@@ -35,7 +34,7 @@ def login_usuario(datos: modeloDatos.Login, request: Request):
     return { "access_token": access_token, "token_type": "bearer"} # devolvemos el token para verificar al usuario cada vez que quiera hacer una accion
 
 #~Endpoint para buscar personas en el sistema   
-@app.get("/persona/buscar")
+@router.get("/persona/buscar")
 def buscar_personas(termino: str, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
     exito, resultados = consultasPersona.buscar_personas(termino)
     if not exito:
@@ -43,7 +42,7 @@ def buscar_personas(termino: str, current_user_id: int = Depends(funcionesSeguri
     return resultados
 
 #-Endpoint para solicitar amistad a una persona
-@app.post("/amigos/solicitar")
+@router.post("/amigos/solicitar")
 def solicitar_amistad(datos: modeloDatos.AmigoRequest, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
     exito, resultado = consultasPersona.peticion_amistad(current_user_id, datos.id_persona_objetivo)
     if not exito:
@@ -51,14 +50,14 @@ def solicitar_amistad(datos: modeloDatos.AmigoRequest, current_user_id: int = De
     return {"mensaje": resultado}
 
 #-Endpoint para ver peticiones pendientes de aceptar o de rechazar
-@app.get("/amigos/pendientes")
+@router.get("/amigos/pendientes")
 def ver_solicitudes_pendientes(current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
     exito, resultado = consultasPersona.ver_peticiones_pendientes(current_user_id)
     if not exito: return []
     return resultado
 
 #-Endpoint para aceptar peticiones de amistad
-@app.post("/amigos/aceptar")
+@router.post("/amigos/aceptar")
 def aceptar_amistad(datos: modeloDatos.AmigoRequest, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
     exito, resultado = consultasPersona.aceptar_amistad(current_user_id, datos.id_persona_objetivo)
     if not exito:
@@ -66,7 +65,7 @@ def aceptar_amistad(datos: modeloDatos.AmigoRequest, current_user_id: int = Depe
     return {"mensaje": resultado}
 
 #-Endpoint para listar los amigos de una persona
-@app.get("/amigos/listar")
+@router.get("/amigos/listar")
 def listar_amigos(current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
     exito, amigos = consultasPersona.ver_amigos(current_user_id)
     if not exito: raise HTTPException(status_code=400, detail=str(amigos))

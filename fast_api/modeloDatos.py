@@ -25,3 +25,7 @@ class AlbumInvitacion(BaseModel):
 class RecursoCompartir(BaseModel):
     id_persona_destino: int
     id_recurso: int
+
+class AlbumRecurso(BaseModel):
+    id_album: int
+    id_recurso: int

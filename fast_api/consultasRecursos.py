@@ -1,22 +1,12 @@
-import os
-import mysql.connector
+import db
 from mysql.connector import Error
 from datetime import datetime
 from typing import Optional
-from dotenv import load_dotenv
-load_dotenv()
-config = {
-    'user': os.getenv('DB_USER'), 
-    'password': os.getenv('DB_PASSWORD'), 
-    'host': os.getenv('DB_HOST'),
-    'database': 'moiselincloud',
-    'port': 3306
-}
 
 def subir_recurso(id_creador: int, tipo: str, enlace: str, nombre: str, fecha_real: Optional[datetime] = None):
     connection = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         if connection.is_connected():
             cursor = connection.cursor()
             query_1 = "INSERT INTO Recurso (id_creador, tipo, enlace, nombre, fecha_real) VALUES(%s,%s,%s,%s,%s)"
@@ -36,7 +26,7 @@ def subir_recurso(id_creador: int, tipo: str, enlace: str, nombre: str, fecha_re
 def obtener_recursos(id_persona:int):
     connection = None
     try: 
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         if connection.is_connected():
             cursor = connection.cursor(dictionary=True)
             query = "SELECT id, id_creador, tipo, enlace, nombre, fecha_real, fecha_subida FROM Recurso r JOIN Recurso_Persona rp ON r.id=rp.id_recurso WHERE rp.id_persona=%s"
@@ -54,7 +44,7 @@ def obtener_recursos(id_persona:int):
 def borrar_recurso(id_recurso:int, id_persona:int):
     connection = None
     try: 
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         connection.autocommit = False
         if connection.is_connected():
             cursor = connection.cursor()
@@ -90,7 +80,7 @@ def borrar_recurso(id_recurso:int, id_persona:int):
 def cambiar_nombre_recurso(id_recurso:int, nombre:str, id_persona:int):
     connection = None
     try: 
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         connection.autocommit = False
         if connection.is_connected():
             cursor = connection.cursor()
@@ -115,7 +105,7 @@ def cambiar_nombre_recurso(id_recurso:int, nombre:str, id_persona:int):
 def cambiar_fecha_recurso(id_recurso:int, fecha:datetime, id_persona:int):
     connection = None
     try: 
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         connection.autocommit = False
         if connection.is_connected():
             cursor = connection.cursor()
@@ -140,7 +130,7 @@ def cambiar_fecha_recurso(id_recurso:int, fecha:datetime, id_persona:int):
 def pedir_compartir_recurso(id_persona: int, id_persona_compartida: int, id_recurso:int):
     connection = None
     try: 
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         if connection.is_connected():
             cursor = connection.cursor()
             query = "INSERT INTO Peticion_recurso (id_persona, id_persona_compartida, id_recurso) VALUES (%s, %s, %s)"
@@ -164,7 +154,7 @@ def pedir_compartir_recurso(id_persona: int, id_persona_compartida: int, id_recu
 def aceptar_compartir_recurso(id_persona: int, id_persona_compartida: int, id_recurso: int):
     connection = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         connection.autocommit = False
         if connection.is_connected():
             cursor = connection.cursor()
@@ -194,7 +184,7 @@ def ver_peticiones_recurso_pendientes(id_persona_compartida: int):
     connection = None
     cursor = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         cursor = connection.cursor(dictionary=True)
         query = """
             SELECT P.nombre as remitente, R.nombre as recurso, R.tipo, PR.id_recurso, PR.id_persona as id_remitente
@@ -215,7 +205,7 @@ def rechazar_peticion_recurso(id_persona: int, id_persona_compartida: int, id_re
     connection = None
     cursor = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         cursor = connection.cursor()
         query = "DELETE FROM Peticion_Recurso WHERE id_persona=%s AND id_persona_compartida=%s AND id_recurso=%s"
         cursor.execute(query, (id_persona, id_persona_compartida, id_recurso))
@@ -233,7 +223,7 @@ def obtener_recurso_por_id(id_recurso: int, id_persona: int):
     connection = None
     cursor = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         cursor = connection.cursor(dictionary=True)
         query = """
             SELECT R.* FROM Recurso R
@@ -255,7 +245,7 @@ def revocar_acceso_recurso(id_recurso: int, id_propietario: int, id_usuario_a_el
     connection = None
     cursor = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         cursor = connection.cursor()
         
         # 1. Verificar si tiene permiso (Usando Recurso_Persona para permitir gestión compartida)
@@ -287,7 +277,7 @@ def revocar_todos_accesos_recurso(id_recurso: int, id_persona: int):
     connection = None
     cursor = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         connection.autocommit = False # Usamos transacción por seguridad
         if connection.is_connected():
             cursor = connection.cursor()

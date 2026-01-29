@@ -1,23 +1,11 @@
-import os
-import mysql.connector
+import db
 from mysql.connector import Error
-from dotenv import load_dotenv
-
-load_dotenv()
-
-config = {
-    'user': os.getenv('DB_USER'),
-    'password': os.getenv('DB_PASSWORD'), 
-    'host': os.getenv('DB_HOST'),
-    'database': 'moiselincloud',
-    'port': 3306
-}
 
 def guardar_persona(nombre, apellidos, correo, contra_hash):
     connection = None
     cursor = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         if connection.is_connected():
             cursor = connection.cursor()
             query = "INSERT INTO Persona (nombre, apellidos, correo_electronico, contra_hash) VALUES (%s, %s, %s, %s);"
@@ -36,7 +24,7 @@ def obtener_persona(correo):
     connection = None
     cursor = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         if connection.is_connected():
             cursor = connection.cursor(dictionary=True)
             query = "SELECT id, nombre, apellidos, contra_hash FROM Persona WHERE correo_electronico=%s"
@@ -55,7 +43,7 @@ def peticion_amistad(id_persona: int, id_persona_solicitada: int):
     connection = None
     cursor = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         if connection.is_connected():
             cursor = connection.cursor()
             query = "INSERT INTO Peticion_Amistad(id_persona, id_persona_solicitada) VALUES (%s,%s)"
@@ -75,7 +63,7 @@ def aceptar_amistad(id_persona_que_acepta: int, id_persona_que_envio: int):
     connection = None
     cursor = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         connection.autocommit = False
         if connection.is_connected():
             cursor = connection.cursor()
@@ -111,7 +99,7 @@ def ver_amigos(id_persona: int):
     connection = None
     cursor = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         if connection.is_connected():
             cursor = connection.cursor(dictionary=True)
             
@@ -141,7 +129,7 @@ def ver_peticiones_pendientes(id_persona: int):
     connection = None
     cursor = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         if connection.is_connected():
             cursor = connection.cursor(dictionary=True)
             query = """
@@ -162,7 +150,7 @@ def rechazar_amistad(id_persona_que_rechaza: int, id_persona_que_envio: int):
     connection = None
     cursor = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         if connection.is_connected():
             cursor = connection.cursor()
             # Simplemente borramos la petición
@@ -183,7 +171,7 @@ def eliminar_amigo(id_persona: int, id_ex_amigo: int):
     connection = None
     cursor = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         if connection.is_connected():
             cursor = connection.cursor()
             # Como no sabemos si está guardado como (Yo, Él) o (Él, Yo), chequeamos ambas combinaciones
@@ -208,7 +196,7 @@ def buscar_personas(termino_busqueda: str):
     connection = None
     cursor = None
     try:
-        connection = mysql.connector.connect(**config)
+        connection = db.get_connection()
         if connection.is_connected():
             cursor = connection.cursor(dictionary=True)
             # Buscamos por nombre, apellido o correo usando LIKE
