@@ -12,9 +12,4 @@ def hashear_contra (contra: str) -> str:
 def verificar_contra (contra_cifrada: str) -> str:
     return pwd_context.verify(contra_cifrada)
 
-@app.post("/registrar")
-async def registrar_persona(datos: PersonaRegistrar):
-    nombre = datos.nombre
-    apellidos = datos.apellidos
-    contra = hashear_contra(datos.contra)
-    correo_electronico = datos.correo_electronico
+
