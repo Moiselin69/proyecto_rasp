@@ -1,0 +1,41 @@
+# --- PYTHON / BACKEND ---
+# El entorno virtual (pesa mucho y es innecesario subirlo)
+venv/
+env/
+.venv/
+
+# Archivos compilados de Python
+__pycache__/
+*.py[cod]
+
+# Variables de entorno (¡SEGURIDAD! Nunca subas contraseñas)
+.env
+.env.local
+
+# Base de datos local (si usas SQLite)
+*.sqlite3
+*.db
+
+# Carpeta de subidas (fotos de prueba)
+fast_api/static/uploads/
+
+
+# --- FLUTTER / APP ---
+# Archivos generados automáticamente
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+
+# Archivos específicos de Android/iOS generados
+android/.gradle
+ios/.symlinks
+ios/Pods/
+
+
+# --- GENERAL / VS CODE ---
+.vscode/
+.idea/
+*.log
+.DS_Store
