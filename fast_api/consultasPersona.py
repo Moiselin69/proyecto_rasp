@@ -24,10 +24,10 @@ def obtener_persona(correo):
     connection = None
     cursor = None
     try:
-        connection = db.get_connection()
-        if connection.is_connected():
+        connection = db.get_connection() # Asumiendo que ya hiciste el cambio del Apartado D (db.py)
+        if connection and connection.is_connected():
             cursor = connection.cursor(dictionary=True)
-            query = "SELECT id, nombre, apellidos, contra_hash FROM Persona WHERE correo_electronico=%s"
+            query = "SELECT id, nombre, apellidos, correo_electronico, contra_hash FROM Persona WHERE correo_electronico=%s"
             cursor.execute(query, (correo, ))
             return (True, cursor.fetchone())
     except Error as e:

@@ -4,12 +4,12 @@ from passlib.context import CryptContext
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from fastapi import HTTPException, Depends, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 load_dotenv()
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="persona/login") # Definición del esquema de seguridad (Login URL)
+security = HTTPBearer()
 
 def hashear_contra(contra: str) -> str: # función utilizada para hashear la contraseña de un usuario
     return pwd_context.hash(contra)
@@ -27,9 +27,10 @@ def crear_token_acceso(data: dict): # funcion que sirve para crear el token de a
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-async def get_current_user_id(token: str = Depends(oauth2_scheme)) -> int: # sirve para obtener el id del usuario cada vez que el usuario envia su token
+async def get_current_user_id(token_obj: HTTPAuthorizationCredentials = Depends(security)) -> int: # sirve para obtener el id del usuario cada vez que el usuario envia su token
     credentials_exception = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No se pudieron validar las credenciales",  headers={"WWW-Authenticate": "Bearer"},)
     try:
+        token = token_obj.credentials
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id: str = payload.get("sub")
         if user_id is None:
