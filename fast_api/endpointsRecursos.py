@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from fastapi.responses import FileResponse
+from PIL import Image
 import consultasRecursos
 import funcionesSeguridad
 import modeloDatos
@@ -13,17 +14,31 @@ router = APIRouter()
 #~Endpoint para subir recursos
 @router.post("/recurso/subir")
 async def subir_archivo(tipo: str = Form(...), fecha: Optional[datetime] = Form(None), file: UploadFile = File(...), current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
-    carpeta_destino = "static/uploads"# 1. Guardar archivo físico
-    os.makedirs(carpeta_destino, exist_ok=True)
+    carpeta_original = "static/uploads"
+    carpeta_miniatura = "static/thumbnails" # Nueva carpeta
+    os.makedirs(carpeta_original, exist_ok=True)
+    os.makedirs(carpeta_miniatura, exist_ok=True)
     nombre_original, extension = os.path.splitext(file.filename)
     nombre_archivo = f"{uuid.uuid4()}{extension}"
-    ruta_completa = os.path.join(carpeta_destino, nombre_archivo)
-    with open(ruta_completa, "wb") as buffer:
+    ruta_completa_original = os.path.join(carpeta_original, nombre_archivo)
+    with open(ruta_completa_original, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-    enlace_db = ruta_completa # 2. Guardar en BD (El dueño es el del token)
+    if tipo == "IMAGEN":
+        try:
+            ruta_completa_miniatura = os.path.join(carpeta_miniatura, nombre_archivo)
+            with Image.open(ruta_completa_original) as img:
+                img.thumbnail((300, 300))
+                if img.mode in ("RGBA", "P"): 
+                    img = img.convert("RGB")
+                img.save(ruta_completa_miniatura)
+        except Exception as e:
+            print(f"Error creando miniatura: {e}")    
+    enlace_db = ruta_completa_original # 2. Guardar en BD (El dueño es el del token)
     exito, id_recurso = consultasRecursos.subir_recurso(current_user_id, tipo, enlace_db, file.filename, fecha)
     if not exito:
-        os.remove(ruta_completa)
+        os.remove(ruta_completa_original)
+        if os.path.exists(os.path.join(carpeta_miniatura, nombre_archivo)):
+            os.remove(os.path.join(carpeta_miniatura, nombre_archivo))
         raise HTTPException(status_code=500, detail=str(id_recurso))
     return {"mensaje": "Archivo subido", "id_recurso": id_recurso}
 
@@ -58,14 +73,20 @@ def compartir_recurso_endpoint(datos: modeloDatos.RecursoCompartir, current_user
 
 #~Endpoint para visualizar o descargar un archivo
 @router.get("/recurso/archivo/{id_recurso}")
-def ver_archivo_recurso(id_recurso: int, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+def ver_archivo_recurso(id_recurso: int, size:str = "full",current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
     exito, res = consultasRecursos.obtener_recurso_por_id(id_recurso, current_user_id)
     if not exito or not res:
         raise HTTPException(status_code=404, detail="Recurso no encontrado o acceso denegado")
-    ruta_archivo = res['enlace']
-    if not os.path.exists(ruta_archivo):
+    ruta_original = res['enlace']
+    if size == "small" and res['tipo'] == "IMAGEN":
+        ruta_miniatura = ruta_original.replace("uploads", "thumbnails")
+        if os.path.exists(ruta_miniatura):
+            return FileResponse(ruta_miniatura)
+        else:
+            return FileResponse(ruta_original)
+    if not os.path.exists(ruta_original):
         raise HTTPException(status_code=404, detail="El archivo físico se ha perdido")
-    return FileResponse(ruta_archivo)
+    return FileResponse(ruta_original)
 
 #~Endpoint para ver quién te quiere compartir archivos
 @router.get("/recurso/peticiones")

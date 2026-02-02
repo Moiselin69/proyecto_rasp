@@ -29,10 +29,20 @@ def obtener_recursos(id_persona:int):
         connection = db.get_connection()
         if connection.is_connected():
             cursor = connection.cursor(dictionary=True)
-            query = "SELECT id, id_creador, tipo, enlace, nombre, fecha_real, fecha_subida FROM Recurso r JOIN Recurso_Persona rp ON r.id=rp.id_recurso WHERE rp.id_persona=%s"
+            query = """
+                SELECT r.id, r.tipo, r.nombre, r.fecha_real, r.fecha_subida 
+                FROM Recurso r 
+                JOIN Recurso_Persona rp ON r.id=rp.id_recurso 
+                WHERE rp.id_persona=%s
+                ORDER BY r.fecha_real DESC
+            """
             valores = (id_persona, )
             cursor.execute(query, valores)
-            return (True, cursor.fetchall())
+            recursos = cursor.fetchall()
+            for recurso in recursos:
+                recurso['url_visualizacion'] = f"/recurso/archivo/{recurso['id']}"
+                recurso['url_thumbnail'] = f"/recurso/archivo/{recurso['id']}?size=small"
+            return (True, recursos)
     except Error as e:
         print(f"Error en obtener recursos en MySql: {e}")
         return (False, str(e))
