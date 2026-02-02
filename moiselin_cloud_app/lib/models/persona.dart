@@ -1,25 +1,31 @@
-class Persona{
-  final String id;
-  final String correoElectronico;
+class Persona {
+  final int id;
   final String nombre;
   final String apellidos;
-  final DateTime fechaCreacionPerfil;
+  final String correo;
+
   Persona({
     required this.id,
-    required this.correoElectronico,
     required this.nombre,
     required this.apellidos,
-    required this.fechaCreacionPerfil
+    required this.correo,
   });
-}
-class Recurso{
-  final String id;
-  final String? idCreador;
-  final String tipo;
-  Recurso({
-    required this.id,
-    this.idCreador,
-    required this.tipo,
 
-  });
+  factory Persona.fromJson(Map<String, dynamic> json) {
+    return Persona(
+      id: json['id'],
+      nombre: json['nombre'] ?? '',
+      apellidos: json['apellidos'] ?? '', 
+      correo: json['correo_electronico'] ?? '',
+    );
+  }
+
+  String get nombreCompleto => "$nombre $apellidos".trim();
+
+  String get iniciales {
+    if (nombre.isEmpty) return "";
+    final String inicialNombre = nombre[0];
+    final String inicialApellido = apellidos.isNotEmpty ? apellidos[0] : "";
+    return "$inicialNombre$inicialApellido".toUpperCase();
+  }
 }

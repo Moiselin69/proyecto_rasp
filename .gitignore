@@ -11,7 +11,9 @@ __pycache__/
 # Variables de entorno (¡SEGURIDAD! Nunca subas contraseñas)
 .env
 .env.local
-
+generarCertificados.py
+key.pem
+cert.pem
 # Base de datos local (si usas SQLite)
 *.sqlite3
 *.db
