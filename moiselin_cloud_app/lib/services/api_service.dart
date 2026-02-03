@@ -99,4 +99,60 @@ class ApiService {
       return false;
     }
   }
+
+  // Función para editar nombre
+  Future<bool> editarNombre(String token, int idRecurso, String nuevoNombre) async {
+    final url = Uri.parse('$baseUrl/recurso/editar/nombre/$idRecurso');
+    
+    try {
+      final response = await http.put(
+        url,
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json', // ¡Fundamental!
+        },
+        // Esto envía: {"nombre": "Nuevo Nombre"}
+        // Coincide EXACTAMENTE con la clase SolicitudNombre de Python
+        body: jsonEncode({"nombre": nuevoNombre}),
+      );
+
+      if (response.statusCode == 200) {
+        return true;
+      } else {
+        // Si da 400, imprimimos por qué para verlo en consola
+        print("Error del servidor (${response.statusCode}): ${response.body}");
+        return false;
+      }
+    } catch (e) {
+      print("Error de conexión al editar nombre: $e");
+      return false;
+    }
+  }
+
+  // Función para editar fecha
+  Future<bool> editarFecha(String token, int idRecurso, DateTime nuevaFecha) async {
+    final url = Uri.parse('$baseUrl/recurso/editar/fecha/$idRecurso');
+    
+    try {
+      final response = await http.put(
+        url,
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        // Enviamos formato ISO 8601
+        body: jsonEncode({"fecha": nuevaFecha.toIso8601String()}),
+      );
+
+      if (response.statusCode == 200) {
+        return true;
+      } else {
+        print("Error fecha (${response.statusCode}): ${response.body}");
+        return false;
+      }
+    } catch (e) {
+      print("Error conexión fecha: $e");
+      return false;
+    }
+  }
 }

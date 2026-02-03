@@ -259,6 +259,7 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                               ),
                             ),
                           );
+                          if (mounted) {_cargarRecursos();}
                         },
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(12),

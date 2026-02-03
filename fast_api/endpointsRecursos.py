@@ -3,7 +3,7 @@ import os
 import uuid
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Body
 from fastapi.responses import FileResponse
 from PIL import Image
 import consultasRecursos
@@ -115,3 +115,19 @@ def rechazar_recurso_compartido(datos: modeloDatos.RespuestaPeticionRecurso, cur
         raise HTTPException(status_code=400, detail=str(res))
     return {"mensaje": res}
 
+#~Endpoint para editar el nombre de un recursos
+@router.put("/recurso/editar/nombre/{id_recurso}")
+def editar_nombre_recurso(id_recurso: int, datos: modeloDatos.SolicitudNombre, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+    print(f"Recibida petición cambio nombre: {datos.nombre}") 
+    exito, res = consultasRecursos.cambiar_nombre_recurso(id_recurso, datos.nombre, current_user_id)
+    if not exito:
+        raise HTTPException(status_code=400, detail=str(res))
+    return {"mensaje": "Nombre actualizado"}
+
+#~Endpoint para editar fecha
+@router.put("/recurso/editar/fecha/{id_recurso}")
+def editar_fecha_recurso(id_recurso: int, datos: modeloDatos.SolicitudFecha, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+    exito, res = consultasRecursos.cambiar_fecha_recurso(id_recurso, datos.fecha, current_user_id) 
+    if not exito:
+        raise HTTPException(status_code=400, detail=str(res))
+    return {"mensaje": "Fecha actualizada"}

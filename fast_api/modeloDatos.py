@@ -1,4 +1,5 @@
 from pydantic import BaseModel, EmailStr
+from datetime import datetime
 
 class PersonaRegistro(BaseModel):
     nombre: str
@@ -37,3 +38,9 @@ class RespuestaInvitacionAlbum(BaseModel):
 class RespuestaPeticionRecurso(BaseModel):
     id_recurso: int
     id_persona_emisora: int
+
+class SolicitudNombre(BaseModel):
+    nombre: str
+
+class SolicitudFecha(BaseModel):
+    fecha: datetime
