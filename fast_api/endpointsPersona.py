@@ -30,7 +30,7 @@ def login_usuario(datos: modeloDatos.Login, request: Request):
         consultasSeguridad.registrar_intento_fallido(client_ip) # Si hubo fallo en las credenciales lo registramos
         raise HTTPException(status_code=401, detail="Credenciales incorrectas") # por motivos de seguridad no se específica el qué fallo
     consultasSeguridad.limpiar_intentos(client_ip) # si el loggin consiguió ser exitoso borramos el historial de intentos
-    access_token = funcionesSeguridad.crear_token_acceso( data={"id": str(usuario['id']), "correo_electronico": usuario['correo_electronico'], "nombre": usuario['nombre'], "apellidos": usuario['apellidos'], "fecha_creacion": usuario["fecha_creacion"]})
+    access_token = funcionesSeguridad.crear_token_acceso( data={"id": str(usuario['id']), "correo_electronico": usuario['correo_electronico'], "nombre": usuario['nombre'], "apellidos": usuario['apellidos'], "fecha_creacion": str(usuario["fecha_creacion"])})
     return { "access_token": access_token, "token_type": "bearer"} # devolvemos el token para verificar al usuario cada vez que quiera hacer una accion
 
 #~Endpoint para buscar personas en el sistema   

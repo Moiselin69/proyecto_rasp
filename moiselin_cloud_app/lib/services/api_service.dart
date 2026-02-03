@@ -2,9 +2,10 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import "../models/recursos.dart";
+import 'dart:io';
 
 class ApiService {
-  static const String baseUrl = "http://192.168.1.6:8000"; 
+  static const String baseUrl = "https://192.168.1.6:8000"; 
 
   Future<bool> login(String correo, String contra) async {
     final url = Uri.parse('$baseUrl/persona/login');
@@ -67,6 +68,35 @@ class ApiService {
       }
     } catch (e) {
       throw Exception('Error de conexión: $e');
+    }
+  }
+  Future<bool> subirImagen(String token, File archivo) async {
+    // Usamos el endpoint que definimos en endpointsRecursos.py
+    var uri = Uri.parse('$baseUrl/recurso/subir');
+    
+    var request = http.MultipartRequest('POST', uri);
+    
+    // 1. Headers (Autorización)
+    request.headers['Authorization'] = 'Bearer $token';
+
+    // 2. Campos de texto (tipo="IMAGEN")
+    request.fields['tipo'] = 'IMAGEN'; 
+    
+    // 3. El archivo en sí
+    var pic = await http.MultipartFile.fromPath('file', archivo.path);
+    request.files.add(pic);
+
+    try {
+      var response = await request.send();
+      if (response.statusCode == 200) {
+        return true;
+      } else {
+        print("Error subiendo imagen: ${response.statusCode}");
+        return false;
+      }
+    } catch (e) {
+      print("Error de conexión al subir: $e");
+      return false;
     }
   }
 }

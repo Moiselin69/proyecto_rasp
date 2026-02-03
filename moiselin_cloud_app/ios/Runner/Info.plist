@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
+<key>NSPhotoLibraryUsageDescription</key>
+<string>Necesitamos acceso a tu galería para subir fotos a la nube.</string>
+<key>NSCameraUsageDescription</key>
+<string>Necesitamos acceso a tu cámara para tomar fotos.</string>
+<key>NSMicrophoneUsageDescription</key>
+<string>Necesitamos acceso al micrófono para grabar videos.</string>
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>

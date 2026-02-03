@@ -3,6 +3,7 @@
 venv/
 env/
 .venv/
+fast_api/static
 
 # Archivos compilados de Python
 __pycache__/
