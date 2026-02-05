@@ -55,8 +55,10 @@ CREATE TABLE Album(
 	id INT AUTO_INCREMENT,
 	nombre VARCHAR(100) NOT NULL,
 	descripcion VARCHAR(300),
+	id_album_padre INT NOT NULL,
 	fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-	CONSTRAINT pk_album PRIMARY KEY(id)
+	CONSTRAINT pk_album PRIMARY KEY(id),
+	CONSTRAINT fk_album_padre FOREIGN KEY(id_album_padre)
 )ENGINE=InnoDB;
 
 CREATE TABLE Miembro_Album(
@@ -153,6 +155,32 @@ BEGIN
 					(SELECT id_persona FROM Miembro_Album WHERE id_album = p_id_album ORDER BY fecha_union ASC LIMIT 1) AS subquery
             	);
         END IF;
+    END IF;
+END //
+
+CREATE PROCEDURE MoverAlbumSeguro(IN p_album_id INT, IN p_nuevo_padre_id INT,OUT p_resultado VARCHAR(255))
+BEGIN
+    DECLARE v_padre_actual INT;
+    DECLARE v_error BOOL DEFAULT FALSE;
+    IF p_album_id = p_nuevo_padre_id THEN -- 1. Verificación básica: No mover dentro de sí mismo
+        SET p_resultado = 'ERROR: No puedes mover una carpeta dentro de sí misma.';
+        SET v_error = TRUE;
+    END IF;
+    SET v_padre_actual = p_nuevo_padre_id;-- 2. Verificación de Bucle: Subir por el árbol genealógico
+    WHILE v_padre_actual IS NOT NULL AND v_error = FALSE DO -- Empezamos mirando el destino donde queremos poner la carpeta
+        IF v_padre_actual = p_album_id THEN -- Si en algún momento subiendo hacia arriba nos encontramos con la carpeta que estamos moviendo...
+            SET p_resultado = 'ERROR: Movimiento circular detectado. No puedes mover un padre dentro de su hijo.';
+            SET v_error = TRUE;
+        END IF;
+        IF v_error = FALSE THEN -- Subimos un nivel más (buscamos al abuelo)
+            SELECT album_padre_id INTO v_padre_actual 
+            FROM albumes 
+            WHERE id = v_padre_actual;
+        END IF;
+    END WHILE;
+    IF v_error = FALSE THEN -- 3. Si no hubo error, hacemos el UPDATE
+        UPDATE albumes SET album_padre_id = p_nuevo_padre_id WHERE id = p_album_id;
+        SET p_resultado = 'OK';
     END IF;
 END //
 
