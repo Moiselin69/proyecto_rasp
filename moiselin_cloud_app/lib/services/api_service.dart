@@ -4,38 +4,43 @@ import 'package:shared_preferences/shared_preferences.dart';
 import "../models/recursos.dart";
 import 'dart:io';
 import "../models/album.dart";
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class ApiService {
   static const String baseUrl = "https://192.168.1.6:8000"; 
+  final _storage = const FlutterSecureStorage();
 
-  Future<bool> login(String correo, String contra) async {
-    final url = Uri.parse('$baseUrl/persona/login');
+  Future<void> guardarSesion(String email, String password, String token) async {
+    await _storage.write(key: 'email', value: email);
+    await _storage.write(key: 'password', value: password);
+    await _storage.write(key: 'token', value: token);
+  }
 
+  Future<Map<String, String?>> obtenerSesion() async {
+    String? email = await _storage.read(key: 'email');
+    String? password = await _storage.read(key: 'password');
+    String? token = await _storage.read(key: 'token');
+    return {'email': email, 'password': password, 'token': token};
+  }
+
+
+  Future<String?> login(String email, String password) async {
     try {
       final response = await http.post(
-        url,
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
-          "correo": correo,
-          "contra": contra,
-        }),
+        Uri.parse('$baseUrl/token'),
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: {'username': email, 'password': password},
       );
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final String token = data['access_token'];
-        
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('auth_token', token);
-        
-        return true; 
+        return data['access_token']; // Devolvemos el token
       } else {
-        print("Error login: ${response.body}");
-        return false;
+        return null;
       }
     } catch (e) {
-      print("Error de conexión: $e");
-      return false;
+      print("Error en login: $e");
+      return null;
     }
   }
 
@@ -49,7 +54,9 @@ class ApiService {
   Future<void> logout() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_token');
+    await _storage.deleteAll();
   }
+
  Future<List<Recurso>> obtenerMisRecursos(String token) async {
     final response = await http.get(
       Uri.parse('$baseUrl/recurso/mis_recursos'),
@@ -184,4 +191,51 @@ class ApiService {
     }
   }
   
+  Future<bool> borrarRecurso(String token, int idRecurso) async {
+    final response = await http.delete(
+      Uri.parse('$baseUrl/recurso/borrar/$idRecurso'),
+      headers: {'Authorization': 'Bearer $token'},
+    );
+    return response.statusCode == 200;
+  }
+
+  Future<bool> moverRecurso(String token, int idRecurso, int? idAlbumOrigen, int? idAlbumDestino) async {
+    final response = await http.put(
+      Uri.parse('$baseUrl/album/mover-recurso'),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json'
+      },
+      body: jsonEncode({
+        "id_recurso": idRecurso,
+        "id_album_origen": idAlbumOrigen,
+        "id_album_destino": idAlbumDestino,
+      }),
+    );
+    return response.statusCode == 200;
+  }
+
+  Future<bool> borrarAlbum(String token, int idAlbum) async {
+    final response = await http.delete(
+      Uri.parse('$baseUrl/album/borrar/$idAlbum'),
+      headers: {'Authorization': 'Bearer $token'},
+    );
+    return response.statusCode == 200;
+  }
+
+  // Mover Álbum (Necesario si quieres mover carpetas también)
+  Future<bool> moverAlbum(String token, int idAlbum, int? idNuevoPadre) async {
+    final response = await http.put(
+      Uri.parse('$baseUrl/album/mover'),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json'
+      },
+      body: jsonEncode({
+        "id_album": idAlbum,
+        "id_nuevo_padre": idNuevoPadre ?? 0 // Tu backend puede requerir 0 o manejar null, ajústalo según tu SP
+      }),
+    );
+    return response.statusCode == 200;
+  }
 }

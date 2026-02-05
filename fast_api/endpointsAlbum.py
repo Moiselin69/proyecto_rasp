@@ -1,7 +1,9 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Body
 import consultasAlbum
 import funcionesSeguridad
 import modeloDatos
+import os
+from typing import Optional
 router = APIRouter()
 
 #~Endpoint para crear un nuevo album
@@ -91,3 +93,31 @@ def mover_album_endpoint(datos: modeloDatos.AlbumMover, current_user_id: int = D
     if not exito:
         raise HTTPException(status_code=400, detail=str(res))
     return {"mensaje": res}
+
+#~Endpoint para mover un recurso de un album a otro
+@router.put("/album/mover-recurso")
+def mover_recurso_endpoint(id_recurso: int = Body(...),id_album_origen: Optional[int] = Body(None),id_album_destino: Optional[int] = Body(None),current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+    exito, res = consultasAlbum.mover_recurso_de_album(id_recurso, id_album_origen, id_album_destino, current_user_id)
+    if not exito:
+        raise HTTPException(status_code=400, detail=str(res))
+    return {"mensaje": res}
+
+#~Endpoint que sirve para borrar un album
+@router.delete("/album/borrar/{id_album}")
+def borrar_album_endpoint(id_album: int, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+    exito, resultado = consultasAlbum.borrar_album_completo(id_album, current_user_id)
+    if not exito:
+        raise HTTPException(status_code=400, detail=str(resultado))
+    conteo_borrados = 0
+    if isinstance(resultado, list):
+        for ruta_original in resultado:
+            try:
+                if os.path.exists(ruta_original):
+                    os.remove(ruta_original)
+                    conteo_borrados += 1
+                ruta_thumbnail = ruta_original.replace("uploads", "thumbnails")
+                if os.path.exists(ruta_thumbnail):
+                    os.remove(ruta_thumbnail)
+            except Exception as e:
+                print(f"Error no crítico borrando archivo {ruta_original}: {e}")
+    return {"mensaje": f"Carpeta eliminada y {conteo_borrados} archivos borrados físicamente."}

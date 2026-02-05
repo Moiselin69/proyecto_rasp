@@ -9,13 +9,9 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  
-  // Controladores de texto
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-  
   final ApiService _apiService = ApiService();
-  
   bool _isLoading = false;
   bool _isObscure = true;
 
@@ -27,32 +23,29 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _iniciarSesion() async {
-    if (_formKey.currentState!.validate()) {
-      setState(() => _isLoading = true);
+    setState(() => _isLoading = true);
+    
+    final email = _emailController.text;
+    final password = _passwordController.text;
 
-      // Llamada al backend (ahora viaja cifrada por HTTPS)
-      final exito = await _apiService.login(
-        _emailController.text.trim(),
-        _passwordController.text.trim(),
-      );
+    // Usamos la nueva versión de login que devuelve el String del token
+    String? token = await _apiService.login(email, password);
 
+    if (token != null) {
+      // 1. SI EL LOGIN ES CORRECTO, GUARDAMOS TODO PERMANENTEMENTE
+      await _apiService.guardarSesion(email, password, token);
+
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => GaleriaScreen(token: token)),
+        );
+      }
+    } else {
       setState(() => _isLoading = false);
-
-      if (exito) {
-        // Si el login es correcto, obtenemos el token y pasamos a la galería
-        final token = await _apiService.getToken();
-        if (mounted) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => GaleriaScreen(token: token!)),
-          );
-        }
-      } else {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: Revisa tus credenciales o la conexión al servidor'),
-            backgroundColor: Colors.redAccent,
-          ),
+          SnackBar(content: Text("Credenciales incorrectas o error de conexión")),
         );
       }
     }

@@ -46,7 +46,6 @@ async def subir_archivo(
     enlace_db = ruta_completa_original
     
     # AHORA SÍ pasamos el id_album a la base de datos
-    print(id_album)
     exito, id_recurso = consultasRecursos.subir_recurso(
         current_user_id, tipo, enlace_db, file.filename, fecha, id_album
     )
@@ -74,11 +73,15 @@ def borrar_recurso(id_recurso: int, current_user_id: int = Depends(funcionesSegu
         raise HTTPException(status_code=400, detail=str(resultado))
     if resultado and isinstance(resultado, str): 
         try:
-            if os.path.exists(resultado):
+            if os.path.exists(resultado):# 1. Borrar archivo original (ej: static/uploads/foto.jpg)
                 os.remove(resultado)
                 print(f"Archivo físico eliminado: {resultado}")
+            ruta_thumbnail = resultado.replace("uploads", "thumbnails")# 2. Borrar Thumbnail (ej: static/thumbnails/foto.jpg)
+            if os.path.exists(ruta_thumbnail):
+                os.remove(ruta_thumbnail)
+                print(f"Thumbnail eliminado: {ruta_thumbnail}")
         except Exception as e:
-            print(f"Error borrando archivo físico: {e}")
+            print(f"Error borrando archivos físicos: {e}")
     return {"mensaje": "Recurso eliminado"}
 
 #~Endpoint para compartir recursos

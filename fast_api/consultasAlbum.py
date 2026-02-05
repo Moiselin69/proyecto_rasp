@@ -197,8 +197,9 @@ def obtener_albumes_usuario(id_persona: int):
         connection = db.get_connection()
         cursor = connection.cursor(dictionary=True)
         
+        # CORRECCIÓN AQUÍ: Agregamos A.id_album_padre a la selección
         query = """
-            SELECT A.id, A.nombre, A.descripcion, A.fecha_creacion, M.rol 
+            SELECT A.id, A.nombre, A.descripcion, A.fecha_creacion, A.id_album_padre, M.rol 
             FROM Album A
             JOIN Miembro_Album M ON A.id = M.id_album
             WHERE M.id_persona = %s
@@ -207,7 +208,7 @@ def obtener_albumes_usuario(id_persona: int):
         cursor.execute(query, (id_persona,))
         resultados = cursor.fetchall()
         return (True, resultados)
-    except Exception as e: # Cambiado de Error a Exception para capturar todo
+    except Exception as e:
         print(f"Error en obtener_albumes_usuario: {e}")
         return (False, str(e))
     finally:
@@ -358,5 +359,86 @@ def mover_album(id_album: int, id_nuevo_padre: int, id_persona: int):
         return (False, str(e))
     finally:
         if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+def mover_recurso_de_album(id_recurso: int, id_album_origen: int, id_album_destino: int, id_persona: int):
+    connection = None
+    try:
+        connection = db.get_connection()
+        cursor = connection.cursor()
+        
+        check = "SELECT COUNT(*) FROM Recurso_Persona WHERE id_recurso=%s AND id_persona=%s"
+        cursor.execute(check, (id_recurso, id_persona))
+        if cursor.fetchone()[0] == 0:
+            return (False, "No tienes permiso sobre este archivo")
+
+        if id_album_origen is not None and id_album_destino is not None:
+            query = "UPDATE Recurso_Album SET id_album=%s WHERE id_recurso=%s AND id_album=%s"
+            cursor.execute(query, (id_album_destino, id_recurso, id_album_origen))
+            
+        elif id_album_origen is None and id_album_destino is not None:
+            query = "INSERT INTO Recurso_Album (id_recurso, id_album) VALUES (%s, %s)"
+            cursor.execute(query, (id_recurso, id_album_destino))
+            
+        elif id_album_origen is not None and id_album_destino is None:
+            query = "DELETE FROM Recurso_Album WHERE id_recurso=%s AND id_album=%s"
+            cursor.execute(query, (id_recurso, id_album_origen))
+            
+        connection.commit()
+        return (True, "Archivo movido")
+
+    except Exception as e:
+        if connection: connection.rollback()
+        return (False, str(e))
+    finally:
+        if connection: 
+            cursor.close()
+            connection.close()
+
+def borrar_album_completo(id_album: int, id_persona: int):
+    connection = None
+    rutas_a_borrar = [] # Lista donde guardaremos los paths de los archivos a eliminar del disco
+    try:
+        connection = db.get_connection()
+        cursor = connection.cursor()
+        check = "SELECT rol FROM Miembro_Album WHERE id_album=%s AND id_persona=%s"# 1. Verificar si es CREADOR
+        cursor.execute(check, (id_album, id_persona))
+        res = cursor.fetchone()
+        if not res or res[0] != 'CREADOR':
+            return (False, "Solo el creador puede eliminar la carpeta")
+        def _borrar_recursivamente(id_actual): # --- FUNCIÓN RECURSIVA INTERNA ---
+            cursor.execute("SELECT id FROM Album WHERE id_album_padre = %s", (id_actual,)) # A. Procesar sub-carpetas (primero los hijos)
+            hijos = cursor.fetchall()
+            for fila in hijos:
+                _borrar_recursivamente(fila[0])
+            cursor.execute("SELECT id_recurso FROM Recurso_Album WHERE id_album=%s", (id_actual,)) # B. Procesar recursos del álbum actual
+            recursos = cursor.fetchall()
+            for (id_rec,) in recursos:
+                cursor.execute("SELECT COUNT(*) FROM Recurso_Persona WHERE id_recurso=%s", (id_rec,)) # Antes de borrar, comprobamos si el archivo quedará huérfano (nadie más lo tiene)
+                count = cursor.fetchone()[0] # Si el contador es 1 (solo yo), al borrarme a mí, el archivo debe morir.
+                if count <= 1:
+                    # Recuperamos la ruta física para borrarlo luego
+                    cursor.execute("SELECT enlace FROM Recurso WHERE id=%s", (id_rec,))
+                    fila_recurso = cursor.fetchone()
+                    if fila_recurso:
+                        rutas_a_borrar.append(fila_recurso[0]) # Guardamos ruta original
+                cursor.execute("DELETE FROM Recurso_Persona WHERE id_recurso=%s AND id_persona=%s", (id_rec, id_persona)) # Borramos el permiso (el Trigger de SQL se encargará de borrar la fila de la tabla Recurso)
+            cursor.execute("DELETE FROM Recurso_Album WHERE id_album=%s", (id_actual,))  # C. Limpiar relaciones y borrar álbum
+            cursor.execute("DELETE FROM Miembro_Album WHERE id_album=%s", (id_actual,))
+            cursor.execute("DELETE FROM Peticion_Album WHERE id_album=%s", (id_actual,))
+            cursor.execute("DELETE FROM Album WHERE id=%s", (id_actual,))
+        _borrar_recursivamente(id_album)# 2. Iniciar recursividad
+        
+        connection.commit()
+        # Devolvemos True y la LISTA DE ARCHIVOS en vez de un mensaje simple
+        return (True, rutas_a_borrar)
+
+    except Exception as e:
+        if connection: connection.rollback()
+        print(f"Error borrando album: {e}")
+        return (False, str(e))
+    finally:
+        if connection: 
             cursor.close()
             connection.close()

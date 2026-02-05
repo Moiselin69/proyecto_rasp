@@ -1,50 +1,90 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'screens/login_screen.dart';
-import "package:flutter_localizations/flutter_localizations.dart";
+import 'screens/galeria_screen.dart';
+import 'services/api_service.dart';
 
-// 1. Clase para permitir certificados HTTPS autofirmados (Solo desarrollo)
-class MyHttpOverrides extends HttpOverrides {
-  @override
-  HttpClient createHttpClient(SecurityContext? context) {
-    return super.createHttpClient(context)
-      ..badCertificateCallback = (X509Certificate cert, String host, int port) => true;
-  }
-}
-
-// 2. FUNCIÓN MAIN (La que te faltaba)
 void main() {
-  // Activamos el override de seguridad
-  HttpOverrides.global = MyHttpOverrides();
-  
-  // Arrancamos la App
-  runApp(const MyApp());
+  runApp(MyApp());
 }
 
-// 3. Widget Raíz de la Aplicación
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Moiselin Cloud',
-      debugShowCheckedModeBanner: false,
-      localizationsDelegates: const [
-        GlobalMaterialLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-      ],
-      supportedLocales: const [
-        Locale('es', 'ES'), // Español
-        Locale('en', 'US'), // Inglés (fallback)
-      ],
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
-        useMaterial3: true,
+        primarySwatch: Colors.blue,
       ),
+      home: CheckAuthScreen(), // <--- Arrancamos aquí en vez de LoginScreen
+    );
+  }
+}
 
-      home: LoginScreen(),
+class CheckAuthScreen extends StatefulWidget {
+  @override
+  _CheckAuthScreenState createState() => _CheckAuthScreenState();
+}
+
+class _CheckAuthScreenState extends State<CheckAuthScreen> {
+  final ApiService _apiService = ApiService();
+
+  @override
+  void initState() {
+    super.initState();
+    _checkSession();
+  }
+
+  void _checkSession() async {
+    // 1. Intentamos leer los datos guardados
+    final session = await _apiService.obtenerSesion();
+    final token = session['token'];
+    final email = session['email'];
+    final password = session['password'];
+
+    if (token != null && email != null && password != null) {
+      try {
+        final albumes = await _apiService.obtenerMisAlbumes(token);
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => GaleriaScreen(token: token)),
+          );
+          return;
+        }
+      } catch (e) {
+        print("Token caducado o error, intentando re-login automático...");
+        String? newToken = await _apiService.login(email, password);
+        
+        if (newToken != null) {
+          // Actualizamos el token guardado
+          await _apiService.guardarSesion(email, password, newToken);
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => GaleriaScreen(token: newToken)),
+            );
+            return;
+          }
+        }
+      }
+    }
+
+    // 4. Si todo falla o no hay datos, vamos al Login normal
+    if (mounted) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => LoginScreen()),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Pantalla de carga mientras comprobamos
+    return Scaffold(
+      body: Center(
+        child: CircularProgressIndicator(),
+      ),
     );
   }
 }
