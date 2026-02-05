@@ -8,23 +8,40 @@ def crear_album(nombre: str, descripcion:str, id_persona:int, id_album_padre: in
         connection.autocommit = False
         if connection.is_connected():
             cursor = connection.cursor()
+            
+            # 1. Insertar el Álbum
             query_1 = "INSERT INTO Album (nombre, descripcion, id_album_padre) VALUES (%s, %s, %s);"
-            valores = (nombre, descripcion)
-            query_2 = "INSERT INTO Miembro_Album (id_album, id_persona, rol) VALUES(%s, %s, 'CREADOR')"
+            valores = (nombre, descripcion, id_album_padre)
             cursor.execute(query_1, valores)
-            id_album = cursor.lastrowid
-            valores = (id_persona, id_album)
-            cursor.execute(query_2, valores)
-            if cursor.rowcount == 0:
+            
+            # 2. Recuperar el ID generado de forma robusta
+            if cursor.lastrowid:
+                id_album = cursor.lastrowid
+            else:
+                # Plan B: Si lastrowid falla, pedimos el ID explícitamente a la BD
+                cursor.execute("SELECT LAST_INSERT_ID();")
+                resultado = cursor.fetchone()
+                id_album = resultado[0] if resultado else 0
+
+            # Verificación de seguridad
+            if not id_album or id_album == 0:
                 connection.rollback()
-                return (False, "No se ha podido crear la relacion, vuelva a intentarlo más tarde")
+                return (False, "Error: No se pudo obtener el ID del álbum creado.")
+
+            # 3. Insertar al Creador en Miembro_Album
+            query_2 = "INSERT INTO Miembro_Album (id_album, id_persona, rol) VALUES(%s, %s, 'CREADOR')"
+            valores_miembro = (id_album, id_persona)
+            cursor.execute(query_2, valores_miembro)
+            
             connection.commit()
-            return (True,id_album)
+            return (True, id_album)
+            
     except Error as e:
         if connection and connection.is_connected():
             connection.rollback()
-        print(f"Error en guardar persona en MySql: {e}")
-        return (False,e)
+        # Corregido el mensaje de log para que sea más claro
+        print(f"Error en crear_album (MySQL): {e}")
+        return (False, str(e))
     finally:
         if connection is not None and connection.is_connected():
             if 'cursor' in locals(): cursor.close()

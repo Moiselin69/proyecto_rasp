@@ -5,7 +5,6 @@ import '../models/recursos.dart';
 import "../models/album.dart";
 import 'login_screen.dart';
 import 'dart:io'; 
-import 'package:image_picker/image_picker.dart'; 
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as path;
 import 'detalle_foto_screen.dart';
@@ -18,7 +17,7 @@ class GaleriaScreen extends StatefulWidget {
     Key? key, 
     required this.token, 
     this.parentId, 
-    this.nombreCarpeta = "Mis Fotos"
+    this.nombreCarpeta = "Moiselin Cloud"
   }) : super(key: key);
 
   @override
@@ -27,7 +26,6 @@ class GaleriaScreen extends StatefulWidget {
 
 class _GaleriaScreenState extends State<GaleriaScreen> {
   final ApiService _apiService = ApiService();
-  final ImagePicker _picker = ImagePicker();
   // Variables de Estado
   bool _cargando = true;
   String _filtroSeleccionado = "Todos"; // El filtro activo
@@ -50,12 +48,15 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
         setState(() {
           // 2. Filtramos localmente para mostrar solo los hijos del nivel actual
           _albumesVisibles = albumes.where((a) => a.idAlbumPadre == widget.parentId).toList();
-          _todosLosRecursos = recursos; // Opcional: filtrar recursos por álbum si implementas la relación
+          _todosLosRecursos = recursos.where((r) => r.idAlbum == widget.parentId).toList(); // Opcional: filtrar recursos por álbum si implementas la relación
           _aplicarFiltro(_filtroSeleccionado);
           _cargando = false;
         });
       }
-    } catch (e) { /* manejo de errores */ }
+    } catch (e) {
+      print("Error cargando datos: $e");
+      if (mounted) setState(() => _cargando = false);
+    }
   }
   
 
@@ -115,44 +116,6 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
         ],
       ),
     );
-  }
-
-  Future<void> _seleccionarYSubir() async {
-    try {
-      // 1. Abrir galería
-      final XFile? imagen = await _picker.pickImage(source: ImageSource.gallery);
-      
-      if (imagen == null) return; // El usuario canceló
-
-      // Mostrar carga mientras sube
-      setState(() => _cargando = true);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Subiendo imagen... por favor espera"))
-      );
-
-      // 2. Llamar al backend
-      bool exito = await _apiService.subirImagen(
-        widget.token, 
-        File(imagen.path)
-      );
-
-      // 3. Resultado
-      if (exito) {
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("¡Imagen subida con éxito!"), backgroundColor: Colors.green)
-        );
-        _cargarDatos(); // Recargamos la galería para ver la foto nueva
-      } else {
-        setState(() => _cargando = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error al subir la imagen"), backgroundColor: Colors.red)
-        );
-      }
-    } catch (e) {
-      setState(() => _cargando = false);
-      print(e);
-    }
   }
 
   // Lógica para filtrar la lista localmente
@@ -256,7 +219,7 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        title: Text(widget.nombreCarpeta), // <--- CAMBIO 1: Título dinámico
+        title: Text(widget.nombreCarpeta), 
         elevation: 0,
         actions: [
           IconButton(

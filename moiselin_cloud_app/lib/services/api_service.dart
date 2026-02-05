@@ -50,39 +50,40 @@ class ApiService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_token');
   }
-  Future<List<Recurso>> obtenerMisRecursos(String token) async {
-    final url = Uri.parse('$baseUrl/recurso/mis_recursos');
-    
-    try {
-      final response = await http.get(
-        url,
-        headers: {
-          'Authorization': 'Bearer $token', // ¡Pasamos el token!
-        },
-      );
+ Future<List<Recurso>> obtenerMisRecursos(String token) async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/recurso/mis_recursos'),
+      headers: {'Authorization': 'Bearer $token'},
+    );
 
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
-        return data.map((json) => Recurso.fromJson(json)).toList();
-      } else {
-        throw Exception('Error al cargar recursos: ${response.statusCode}');
-      }
-    } catch (e) {
-      throw Exception('Error de conexión: $e');
+    if (response.statusCode == 200) {
+      List<dynamic> data = jsonDecode(response.body);
+      return data.map((json) => Recurso.fromJson(json)).toList();
+    } else {
+      throw Exception('Error al cargar recursos');
     }
   }
-  Future<bool> subirRecurso(String token, File archivo, String tipo) async {
+  Future<bool> subirRecurso(String token, File archivo, String tipo, {int? idAlbum}) async {
     var uri = Uri.parse('$baseUrl/recurso/subir');
     var request = http.MultipartRequest('POST', uri);
     
     request.headers['Authorization'] = 'Bearer $token';
-    request.fields['tipo'] = tipo; // 'VIDEO', 'AUDIO', 'ARCHIVO'
+    request.fields['tipo'] = tipo; 
+    
+    if (idAlbum != null) {
+      request.fields['id_album'] = idAlbum.toString();
+    }
     
     var fileStream = await http.MultipartFile.fromPath('file', archivo.path);
     request.files.add(fileStream);
 
-    var response = await request.send();
-    return response.statusCode == 200;
+    try {
+      var response = await request.send();
+      return response.statusCode == 200;
+    } catch (e) {
+      print("Error subiendo archivo: $e");
+      return false;
+    }
   }
 
   // Función para editar nombre
@@ -140,34 +141,47 @@ class ApiService {
   }
 
   Future<List<Album>> obtenerMisAlbumes(String token) async {
-    final url = Uri.parse('$baseUrl/album/mis_albumes');
-    
-    try {final response = await http.get(url,headers: {'Authorization': 'Bearer $token'},);
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
-        return data.map((json) => Album.fromJson(json)).toList();
-      } else {
-        throw Exception('Error al cargar álbumes');
-      }
-    } catch (e) {
-      throw Exception('Error de conexión: $e');
+    final response = await http.get(
+      Uri.parse('$baseUrl/album/mis_albumes'),
+      headers: {'Authorization': 'Bearer $token'},
+    );
+
+    if (response.statusCode == 200) {
+      List<dynamic> data = jsonDecode(response.body);
+      return data.map((json) => Album.fromJson(json)).toList();
+    } else {
+      throw Exception('Error al cargar álbumes');
     }
   }
 
-  Future<bool> crearAlbum(String token, String nombre, String descripcion, int? idPadre) async {
-    final url = Uri.parse('$baseUrl/album/crear');
-    final body = {
+  Future<bool> crearAlbum(String token, String nombre, String descripcion, int? parentId) async {
+    final uri = Uri.parse('$baseUrl/album/crear');
+    
+    Map<String, dynamic> body = {
       "nombre": nombre,
       "descripcion": descripcion,
-      if (idPadre != null) "id_album_padre": idPadre // Si tu backend soporta anidamiento
     };
-    
-    final response = await http.post(
-      url,
-      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
-      body: jsonEncode(body),
-    );
-    return response.statusCode == 200;
+
+    // IMPORTANTE: Si hay un padre, lo añadimos al JSON
+    if (parentId != null) {
+      body["id_album_padre"] = parentId;
+    }
+
+    try {
+      final response = await http.post(
+        uri,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode(body),
+      );
+      
+      return response.statusCode == 200;
+    } catch (e) {
+      print("Error creando álbum: $e");
+      return false;
+    }
   }
   
 }

@@ -3,19 +3,25 @@ from mysql.connector import Error
 from datetime import datetime
 from typing import Optional
 
-def subir_recurso(id_creador: int, tipo: str, enlace: str, nombre: str, fecha_real: Optional[datetime] = None):
+def subir_recurso(id_creador: int, tipo: str, enlace: str, nombre: str, fecha_real: Optional[datetime] = None, id_album: Optional[int] = None):
     connection = None
     try:
         connection = db.get_connection()
+        connection.autocommit = False # Importante: Transacción para que se guarden las 3 cosas o ninguna
         if connection.is_connected():
             cursor = connection.cursor()
             query_1 = "INSERT INTO Recurso (id_creador, tipo, enlace, nombre, fecha_real) VALUES(%s,%s,%s,%s,%s)"
             valores = (id_creador, tipo, enlace, nombre, fecha_real)
             cursor.execute(query_1, valores)
             id_recurso = cursor.lastrowid
+            if id_album is not None:
+                query_3 = "INSERT INTO Recurso_Album (id_album, id_recurso) VALUES (%s, %s)"
+                cursor.execute(query_3, (id_album, id_recurso))
             connection.commit()
             return (True, id_recurso)
     except Error as e:
+        if connection and connection.is_connected():
+            connection.rollback()
         print(f"Error en subir recurso en MySql: {e}")
         return (False, str(e))
     finally:
@@ -30,9 +36,10 @@ def obtener_recursos(id_persona:int):
         if connection.is_connected():
             cursor = connection.cursor(dictionary=True)
             query = """
-                SELECT r.id, r.tipo, r.nombre, r.fecha_real, r.fecha_subida 
+                SELECT r.id, r.tipo, r.nombre, r.fecha_real, r.fecha_subida, ra.id_album
                 FROM Recurso r 
                 JOIN Recurso_Persona rp ON r.id=rp.id_recurso 
+                LEFT JOIN Recurso_Album ra ON r.id = ra.id_recurso
                 WHERE rp.id_persona=%s
                 ORDER BY r.fecha_real DESC
             """
@@ -293,8 +300,6 @@ def revocar_todos_accesos_recurso(id_recurso: int, id_persona: int):
             cursor = connection.cursor()
 
             # 1. VERIFICACIÓN: Comprobamos en la tabla 'Recurso' quién es el creador real.
-            # No miramos en Recurso_Persona porque ahí todos son "dueños",
-            # necesitamos la autoridad del 'id_creador' original.
             query_check = "SELECT id_creador FROM Recurso WHERE id = %s"
             cursor.execute(query_check, (id_recurso,))
             resultado = cursor.fetchone()
@@ -309,7 +314,6 @@ def revocar_todos_accesos_recurso(id_recurso: int, id_persona: int):
                 return (False, "Acción denegada: Solo el creador original puede revocar todos los accesos")
 
             # 2. EJECUCIÓN: Borramos a todos de la tabla intermedia MENOS al creador.
-            # El operador '!=' significa "diferente de".
             query_delete = "DELETE FROM Recurso_Persona WHERE id_recurso = %s AND id_persona != %s"
             cursor.execute(query_delete, (id_recurso, id_persona))
             

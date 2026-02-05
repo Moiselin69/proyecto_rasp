@@ -6,6 +6,7 @@ class Recurso {
   final DateTime fechaSubida;
   final String urlVisualizacion; // Ruta relativa: /recurso/archivo/5
   final String urlThumbnail;     // Ruta relativa: /recurso/archivo/5?size=small
+  final int? idAlbum;
 
   Recurso({
     required this.id,
@@ -15,6 +16,7 @@ class Recurso {
     required this.fechaSubida,
     required this.urlVisualizacion,
     required this.urlThumbnail,
+    this.idAlbum,
   });
 
   factory Recurso.fromJson(Map<String, dynamic> json) {
@@ -26,6 +28,7 @@ class Recurso {
       fechaSubida: DateTime.parse(json['fecha_subida']),
       urlVisualizacion: json['url_visualizacion'],
       urlThumbnail: json['url_thumbnail'],
+      idAlbum: json['id_album'],
     );
   }
   bool get esImagen => tipo == 'IMAGEN';

@@ -13,16 +13,25 @@ router = APIRouter()
 
 #~Endpoint para subir recursos
 @router.post("/recurso/subir")
-async def subir_archivo(tipo: str = Form(...), fecha: Optional[datetime] = Form(None), file: UploadFile = File(...), current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+async def subir_archivo(
+    tipo: str = Form(...), 
+    fecha: Optional[datetime] = Form(None), 
+    file: UploadFile = File(...), 
+    id_album: Optional[int] = Form(None),
+    current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)
+):
     carpeta_original = "static/uploads"
-    carpeta_miniatura = "static/thumbnails" # Nueva carpeta
+    carpeta_miniatura = "static/thumbnails" 
     os.makedirs(carpeta_original, exist_ok=True)
     os.makedirs(carpeta_miniatura, exist_ok=True)
+    
     nombre_original, extension = os.path.splitext(file.filename)
     nombre_archivo = f"{uuid.uuid4()}{extension}"
     ruta_completa_original = os.path.join(carpeta_original, nombre_archivo)
+    
     with open(ruta_completa_original, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
+        
     if tipo == "IMAGEN":
         try:
             ruta_completa_miniatura = os.path.join(carpeta_miniatura, nombre_archivo)
@@ -33,13 +42,21 @@ async def subir_archivo(tipo: str = Form(...), fecha: Optional[datetime] = Form(
                 img.save(ruta_completa_miniatura)
         except Exception as e:
             print(f"Error creando miniatura: {e}")    
-    enlace_db = ruta_completa_original # 2. Guardar en BD (El dueño es el del token)
-    exito, id_recurso = consultasRecursos.subir_recurso(current_user_id, tipo, enlace_db, file.filename, fecha)
+            
+    enlace_db = ruta_completa_original
+    
+    # AHORA SÍ pasamos el id_album a la base de datos
+    print(id_album)
+    exito, id_recurso = consultasRecursos.subir_recurso(
+        current_user_id, tipo, enlace_db, file.filename, fecha, id_album
+    )
+    
     if not exito:
         os.remove(ruta_completa_original)
         if os.path.exists(os.path.join(carpeta_miniatura, nombre_archivo)):
             os.remove(os.path.join(carpeta_miniatura, nombre_archivo))
         raise HTTPException(status_code=500, detail=str(id_recurso))
+        
     return {"mensaje": "Archivo subido", "id_recurso": id_recurso}
 
 #~Endpoint para que el usuario vea sus propios recursos
