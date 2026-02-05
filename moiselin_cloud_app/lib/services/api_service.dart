@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import "../models/recursos.dart";
 import 'dart:io';
+import "../models/album.dart";
 
 class ApiService {
   static const String baseUrl = "https://192.168.1.6:8000"; 
@@ -70,34 +71,18 @@ class ApiService {
       throw Exception('Error de conexión: $e');
     }
   }
-  Future<bool> subirImagen(String token, File archivo) async {
-    // Usamos el endpoint que definimos en endpointsRecursos.py
+  Future<bool> subirRecurso(String token, File archivo, String tipo) async {
     var uri = Uri.parse('$baseUrl/recurso/subir');
-    
     var request = http.MultipartRequest('POST', uri);
     
-    // 1. Headers (Autorización)
     request.headers['Authorization'] = 'Bearer $token';
-
-    // 2. Campos de texto (tipo="IMAGEN")
-    request.fields['tipo'] = 'IMAGEN'; 
+    request.fields['tipo'] = tipo; // 'VIDEO', 'AUDIO', 'ARCHIVO'
     
-    // 3. El archivo en sí
-    var pic = await http.MultipartFile.fromPath('file', archivo.path);
-    request.files.add(pic);
+    var fileStream = await http.MultipartFile.fromPath('file', archivo.path);
+    request.files.add(fileStream);
 
-    try {
-      var response = await request.send();
-      if (response.statusCode == 200) {
-        return true;
-      } else {
-        print("Error subiendo imagen: ${response.statusCode}");
-        return false;
-      }
-    } catch (e) {
-      print("Error de conexión al subir: $e");
-      return false;
-    }
+    var response = await request.send();
+    return response.statusCode == 200;
   }
 
   // Función para editar nombre
@@ -109,10 +94,8 @@ class ApiService {
         url,
         headers: {
           'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json', // ¡Fundamental!
+          'Content-Type': 'application/json',
         },
-        // Esto envía: {"nombre": "Nuevo Nombre"}
-        // Coincide EXACTAMENTE con la clase SolicitudNombre de Python
         body: jsonEncode({"nombre": nuevoNombre}),
       );
 
@@ -155,4 +138,36 @@ class ApiService {
       return false;
     }
   }
+
+  Future<List<Album>> obtenerMisAlbumes(String token) async {
+    final url = Uri.parse('$baseUrl/album/mis_albumes');
+    
+    try {final response = await http.get(url,headers: {'Authorization': 'Bearer $token'},);
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        return data.map((json) => Album.fromJson(json)).toList();
+      } else {
+        throw Exception('Error al cargar álbumes');
+      }
+    } catch (e) {
+      throw Exception('Error de conexión: $e');
+    }
+  }
+
+  Future<bool> crearAlbum(String token, String nombre, String descripcion, int? idPadre) async {
+    final url = Uri.parse('$baseUrl/album/crear');
+    final body = {
+      "nombre": nombre,
+      "descripcion": descripcion,
+      if (idPadre != null) "id_album_padre": idPadre // Si tu backend soporta anidamiento
+    };
+    
+    final response = await http.post(
+      url,
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+    return response.statusCode == 200;
+  }
+  
 }

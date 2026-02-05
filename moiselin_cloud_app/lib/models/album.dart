@@ -3,6 +3,7 @@ class Album {
   final String nombre;
   final String descripcion;
   final DateTime fechaCreacion;
+  final int? idAlbumPadre;
   final String rol; // "CREADOR", "ADMINISTRADOR", "COLABORADOR"
 
   Album({
@@ -10,6 +11,7 @@ class Album {
     required this.nombre,
     required this.descripcion,
     required this.fechaCreacion,
+    this.idAlbumPadre,
     required this.rol,
   });
 
@@ -18,8 +20,8 @@ class Album {
       id: json['id'],
       nombre: json['nombre'] ?? 'Sin nombre',
       descripcion: json['descripcion'] ?? '',
-      // El backend devuelve fecha_creacion (snake_case)
-      fechaCreacion: DateTime.parse(json['fecha_creacion']), 
+      fechaCreacion: DateTime.parse(json['fecha_creacion']),
+      idAlbumPadre: json['id_album_padre'], 
       rol: json['rol'] ?? 'COLABORADOR',
     );
   }

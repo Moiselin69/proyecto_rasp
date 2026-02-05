@@ -17,6 +17,7 @@ class AmigoRequest(BaseModel):
 class AlbumCrear(BaseModel):
     nombre: str
     descripcion: str
+    id_album_padre: int | None = None
 
 class AlbumInvitacion(BaseModel):
     id_persona_invitada: int 
@@ -44,3 +45,7 @@ class SolicitudNombre(BaseModel):
 
 class SolicitudFecha(BaseModel):
     fecha: datetime
+
+class AlbumMover(BaseModel):
+    id_album: int
+    id_nuevo_padre: int | None = None

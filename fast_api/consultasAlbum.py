@@ -1,14 +1,14 @@
 import db
 from mysql.connector import Error
 
-def crear_album(nombre: str, descripcion:str, id_persona:int):
+def crear_album(nombre: str, descripcion:str, id_persona:int, id_album_padre: int = None):
     connection = None
     try:
         connection = db.get_connection()
         connection.autocommit = False
         if connection.is_connected():
             cursor = connection.cursor()
-            query_1 = "INSERT INTO Album (nombre, descripcion) VALUES (%s, %s);"
+            query_1 = "INSERT INTO Album (nombre, descripcion, id_album_padre) VALUES (%s, %s, %s);"
             valores = (nombre, descripcion)
             query_2 = "INSERT INTO Miembro_Album (id_album, id_persona, rol) VALUES(%s, %s, 'CREADOR')"
             cursor.execute(query_1, valores)
@@ -178,7 +178,7 @@ def obtener_albumes_usuario(id_persona: int):
     connection = None
     try:
         connection = db.get_connection()
-        cursor = connection.cursor(dictionary=True) # dictionary=True devuelve resultados como JSON/dict
+        cursor = connection.cursor(dictionary=True)
         
         query = """
             SELECT A.id, A.nombre, A.descripcion, A.fecha_creacion, M.rol 
@@ -190,8 +190,9 @@ def obtener_albumes_usuario(id_persona: int):
         cursor.execute(query, (id_persona,))
         resultados = cursor.fetchall()
         return (True, resultados)
-    except Error as e:
-        return (False, e)
+    except Exception as e: # Cambiado de Error a Exception para capturar todo
+        print(f"Error en obtener_albumes_usuario: {e}")
+        return (False, str(e))
     finally:
         if connection and connection.is_connected():
             cursor.close()
@@ -306,6 +307,37 @@ def rechazar_peticion_album(id_persona_invitadora: int, id_usuario_rechazando: i
         connection.commit()
         return (True, "Invitación rechazada")
     except Exception as e:
+        return (False, str(e))
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+def mover_album(id_album: int, id_nuevo_padre: int, id_persona: int):
+    connection = None
+    try:
+        connection = db.get_connection()
+        cursor = connection.cursor()
+        query_permisos = "SELECT rol FROM Miembro_Album WHERE id_album=%s AND id_persona=%s"  # 1. Verificamos que el usuario tenga permisos (sea CREADOR o ADMINISTRADOR)
+        cursor.execute(query_permisos, (id_album, id_persona))
+        resultado = cursor.fetchone()
+        
+        if not resultado or resultado[0] not in ['CREADOR', 'ADMINISTRADOR']:
+            return (False, "No tienes permisos suficientes para mover este álbum")
+
+        args = [id_album, id_nuevo_padre, ""]  # 2. Llamamos al procedimiento almacenado MoverAlbumSeguro
+        resultado_proc = cursor.callproc('MoverAlbumSeguro', args)
+        
+        mensaje_salida = resultado_proc[2] # El resultado del OUT está en la última posición de la lista devuelta por callproc
+        
+        if mensaje_salida == 'OK':
+            connection.commit()
+            return (True, "Álbum movido correctamente")
+        else:
+            return (False, mensaje_salida)
+
+    except Error as e:
+        if connection: connection.rollback()
         return (False, str(e))
     finally:
         if connection and connection.is_connected():

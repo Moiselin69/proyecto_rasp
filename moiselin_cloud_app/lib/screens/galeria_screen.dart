@@ -2,15 +2,24 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../services/api_service.dart';
 import '../models/recursos.dart';
+import "../models/album.dart";
 import 'login_screen.dart';
 import 'dart:io'; 
 import 'package:image_picker/image_picker.dart'; 
+import 'package:file_picker/file_picker.dart';
+import 'package:path/path.dart' as path;
 import 'detalle_foto_screen.dart';
 
 class GaleriaScreen extends StatefulWidget {
   final String token;
-
-  const GaleriaScreen({Key? key, required this.token}) : super(key: key);
+  final int? parentId;
+  final String nombreCarpeta;
+  const GaleriaScreen({
+    Key? key, 
+    required this.token, 
+    this.parentId, 
+    this.nombreCarpeta = "Mis Fotos"
+  }) : super(key: key);
 
   @override
   _GaleriaScreenState createState() => _GaleriaScreenState();
@@ -24,37 +33,88 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
   String _filtroSeleccionado = "Todos"; // El filtro activo
   List<Recurso> _todosLosRecursos = []; // La copia original de todo
   List<Recurso> _recursosFiltrados = []; // Lo que se ve en pantalla
-
-  
-  // Opciones de categorías
-  final List<String> _categorias = ["Todos", "Imagen", "Videos", "Musica", "Otros"];
+  List<Album> _albumesVisibles = [];
+  final List<String> _categorias = ["Todos", "Imagen", "Videos", "Musica", "Otros"]; // Opciones de categorías
 
   @override
-  void initState() {
-    super.initState();
-    _cargarRecursos();
-  }
+  void initState() {super.initState();_cargarDatos();}
 
-  // Carga los datos una sola vez del servidor
-  void _cargarRecursos() async {
+  void _cargarDatos() async {
     setState(() => _cargando = true);
     try {
+      // 1. Cargamos álbumes y recursos
+      final albumes = await _apiService.obtenerMisAlbumes(widget.token);
       final recursos = await _apiService.obtenerMisRecursos(widget.token);
+
       if (mounted) {
         setState(() {
-          _todosLosRecursos = recursos;
-          _aplicarFiltro(_filtroSeleccionado); // Aplicamos el filtro inicial
+          // 2. Filtramos localmente para mostrar solo los hijos del nivel actual
+          _albumesVisibles = albumes.where((a) => a.idAlbumPadre == widget.parentId).toList();
+          _todosLosRecursos = recursos; // Opcional: filtrar recursos por álbum si implementas la relación
+          _aplicarFiltro(_filtroSeleccionado);
           _cargando = false;
         });
       }
-    } catch (e) {
-      if (mounted) {
+    } catch (e) { /* manejo de errores */ }
+  }
+  
+
+  String _obtenerTipoArchivo(String pathArchivo) {
+    String ext = path.extension(pathArchivo).toLowerCase();
+    if (['.jpg', '.jpeg', '.png', '.gif', '.webp'].contains(ext)) return 'IMAGEN';
+    if (['.mp4', '.mov', '.avi', '.mkv'].contains(ext)) return 'VIDEO';
+    if (['.mp3', '.wav', '.aac', '.flac'].contains(ext)) return 'AUDIO';
+    return 'ARCHIVO';
+  }
+
+  Future<void> _subirArchivoUniversal() async {
+    FilePickerResult? result = await FilePicker.platform.pickFiles(allowMultiple: false);
+
+    if (result != null && result.files.single.path != null) {
+      File file = File(result.files.single.path!);
+      String tipo = _obtenerTipoArchivo(file.path);
+
+      setState(() => _cargando = true);
+      
+      // Llamamos al nuevo método del servicio
+      bool exito = await _apiService.subirRecurso(widget.token, file, tipo);
+
+      if (exito) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Archivo subido")));
+        _cargarDatos();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error al subir")));
         setState(() => _cargando = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error cargando galería: $e")),
-        );
       }
     }
+  }
+
+  void _mostrarCrearAlbumDialog() {
+    final nombreCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text("Nueva Carpeta"),
+        content: TextField(
+          controller: nombreCtrl,
+          decoration: InputDecoration(hintText: "Nombre de la carpeta"),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text("Cancelar")),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              setState(() => _cargando = true);
+              // Pasamos el parentId actual para crear la carpeta DENTRO de la actual
+              bool ok = await _apiService.crearAlbum(widget.token, nombreCtrl.text, "", widget.parentId);
+              if (ok) _cargarDatos();
+              else setState(() => _cargando = false);
+            },
+            child: Text("Crear"),
+          )
+        ],
+      ),
+    );
   }
 
   Future<void> _seleccionarYSubir() async {
@@ -82,7 +142,7 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("¡Imagen subida con éxito!"), backgroundColor: Colors.green)
         );
-        _cargarRecursos(); // Recargamos la galería para ver la foto nueva
+        _cargarDatos(); // Recargamos la galería para ver la foto nueva
       } else {
         setState(() => _cargando = false);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -136,6 +196,30 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
     }
   }
 
+  Widget _buildCarpeta(Album album) {
+    return GestureDetector(
+      onTap: () {
+        // Navegación recursiva: entramos a otra instancia de GaleriaScreen
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => GaleriaScreen(
+              token: widget.token,
+              parentId: album.id,
+              nombreCarpeta: album.nombre,
+            ),
+          ),
+        );
+      },
+      child: Column(
+        children: [
+          Icon(Icons.folder, size: 60, color: Colors.amber),
+          Text(album.nombre, style: TextStyle(fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+
   Widget _getIconoArchivo(Recurso recurso) {
     IconData icono;
     Color color;
@@ -172,12 +256,12 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        title: Text("Moiselin Cloud"),
+        title: Text(widget.nombreCarpeta), // <--- CAMBIO 1: Título dinámico
         elevation: 0,
         actions: [
           IconButton(
             icon: Icon(Icons.refresh),
-            onPressed: _cargarRecursos,
+            onPressed: _cargarDatos,
           ),
           IconButton(
             icon: Icon(Icons.exit_to_app),
@@ -187,7 +271,7 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
       ),
       body: Column(
         children: [
-          // 1. SECCIÓN DE FILTROS (Horizontal Scroll)
+          // 1. SECCIÓN DE FILTROS (Se mantiene igual)
           Container(
             height: 60,
             padding: EdgeInsets.symmetric(vertical: 10),
@@ -198,7 +282,6 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
               itemBuilder: (context, index) {
                 final cat = _categorias[index];
                 final isSelected = _filtroSeleccionado == cat;
-                
                 return Padding(
                   padding: const EdgeInsets.only(right: 8.0),
                   child: FilterChip(
@@ -225,14 +308,14 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
           Expanded(
             child: _cargando 
               ? Center(child: CircularProgressIndicator())
-              : _recursosFiltrados.isEmpty 
+              : (_albumesVisibles.isEmpty && _recursosFiltrados.isEmpty) // Checkeamos ambas listas
                   ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(Icons.search_off, size: 60, color: Colors.grey),
                           SizedBox(height: 10),
-                          Text("No hay elementos en '${_filtroSeleccionado}'"),
+                          Text("Carpeta vacía"),
                         ],
                       ),
                     )
@@ -242,67 +325,86 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                         crossAxisCount: 3, 
                         crossAxisSpacing: 8,
                         mainAxisSpacing: 8,
-                        childAspectRatio: 1.0,
+                        childAspectRatio: 0.8, // Ajustado para que quepa el texto de la carpeta
                       ),
-                      itemCount: _recursosFiltrados.length,
+                      // CAMBIO 2: La cuenta es la suma de carpetas + archivos
+                      itemCount: _albumesVisibles.length + _recursosFiltrados.length,
                       itemBuilder: (context, index) {
-                        final recurso = _recursosFiltrados[index];
-                        final urlImagen = "${ApiService.baseUrl}${recurso.urlThumbnail}";
-                        return GestureDetector(
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                            MaterialPageRoute(
-                              builder: (_) => DetalleFotoScreen(
-                                recurso: recurso,
-                                token: widget.token,
+                        
+                        // CAMBIO 3: Lógica para decidir si pintamos carpeta o archivo
+                        if (index < _albumesVisibles.length) {
+                          // Es una carpeta
+                          return _buildCarpeta(_albumesVisibles[index]);
+                        } else {
+                          // Es un recurso (ajustamos el índice restando las carpetas)
+                          final recurso = _recursosFiltrados[index - _albumesVisibles.length];
+                          final urlImagen = "${ApiService.baseUrl}${recurso.urlThumbnail}";
+                          
+                          return GestureDetector(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => DetalleFotoScreen(
+                                    recurso: recurso,
+                                    token: widget.token,
+                                  ),
+                                ),
+                              ).then((_) => _cargarDatos()); // Recargar al volver
+                            },
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  recurso.esImagen
+                                    ? CachedNetworkImage(
+                                        imageUrl: urlImagen,
+                                        httpHeaders: {"Authorization": "Bearer ${widget.token}"},
+                                        fit: BoxFit.cover,
+                                        placeholder: (context, url) => Container(color: Colors.grey[200]),
+                                        errorWidget: (context, url, error) => Icon(Icons.error),
+                                      )
+                                    : _getIconoArchivo(recurso),
+                                  
+                                  if (recurso.tipo == "VIDEO")
+                                    Center(
+                                      child: Container(
+                                        decoration: BoxDecoration(
+                                          color: Colors.black45,
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: Icon(Icons.play_arrow, color: Colors.white, size: 30),
+                                      ),
+                                    )
+                                ],
                               ),
                             ),
                           );
-                          if (mounted) {_cargarRecursos();}
-                        },
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                // FONDO (Imagen o Icono)
-                                recurso.esImagen
-                                  ? CachedNetworkImage(
-                                      imageUrl: urlImagen,
-                                      httpHeaders: {"Authorization": "Bearer ${widget.token}"},
-                                      fit: BoxFit.cover,
-                                      placeholder: (context, url) => Container(color: Colors.grey[200]),
-                                      errorWidget: (context, url, error) => Icon(Icons.error),
-                                    )
-                                  : _getIconoArchivo(recurso),
-                                
-                                // REPRODUCIR (Overlay para videos)
-                                if (recurso.tipo == "VIDEO")
-                                  Center(
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        color: Colors.black45,
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: Icon(Icons.play_arrow, color: Colors.white, size: 30),
-                                    ),
-                                  )
-                              ],
-                            ),
-                          ),
-                        );
+                        }
                       },
                     ),
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _cargando ? null : _seleccionarYSubir, // <--- Conectamos la función
-        backgroundColor: Colors.blue,
-        child: _cargando 
-          ? CircularProgressIndicator(color: Colors.white)
-          : Icon(Icons.add_a_photo),
+      floatingActionButton: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          FloatingActionButton(
+            heroTag: "btnFolder",
+            backgroundColor: Colors.amber,
+            onPressed: _cargando ? null : _mostrarCrearAlbumDialog,
+            child: Icon(Icons.create_new_folder),
+          ),
+          SizedBox(height: 10),
+          FloatingActionButton(
+            heroTag: "btnFile",
+            onPressed: _cargando ? null : _subirArchivoUniversal,
+            child: _cargando 
+              ? CircularProgressIndicator(color: Colors.white)
+              : Icon(Icons.file_upload),
+          ),
+        ],
       ),
     );
   }

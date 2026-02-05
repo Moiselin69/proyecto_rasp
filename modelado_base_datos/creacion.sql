@@ -55,10 +55,10 @@ CREATE TABLE Album(
 	id INT AUTO_INCREMENT,
 	nombre VARCHAR(100) NOT NULL,
 	descripcion VARCHAR(300),
-	id_album_padre INT NOT NULL,
+	id_album_padre INT NULL,
 	fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 	CONSTRAINT pk_album PRIMARY KEY(id),
-	CONSTRAINT fk_album_padre FOREIGN KEY(id_album_padre)
+	CONSTRAINT fk_album_padre FOREIGN KEY(id_album_padre) REFERENCES Album(id) ON DELETE CASCADE
 )ENGINE=InnoDB;
 
 CREATE TABLE Miembro_Album(

@@ -7,7 +7,7 @@ router = APIRouter()
 #~Endpoint para crear un nuevo album
 @router.post("/album/crear")
 def crear_nuevo_album(album: modeloDatos.AlbumCrear, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
-    exito, resultado = consultasAlbum.crear_album(album.nombre, album.descripcion, current_user_id)
+    exito, resultado = consultasAlbum.crear_album(album.nombre, album.descripcion, current_user_id, album.id_album_padre)
     if not exito:
         raise HTTPException(status_code=400, detail=str(resultado))
     return {"mensaje": "Album creado", "id_album": resultado}
@@ -80,6 +80,14 @@ def aceptar_invitacion_album(datos: modeloDatos.RespuestaInvitacionAlbum, curren
 @router.post("/album/invitacion/rechazar")
 def rechazar_invitacion_album(datos: modeloDatos.RespuestaInvitacionAlbum, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
     exito, res = consultasAlbum.rechazar_peticion_album(datos.id_persona_invitadora, current_user_id, datos.id_album)
+    if not exito:
+        raise HTTPException(status_code=400, detail=str(res))
+    return {"mensaje": res}
+
+#~Endpoint para mover un album a un album hijo
+@router.put("/album/mover")
+def mover_album_endpoint(datos: modeloDatos.AlbumMover, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+    exito, res = consultasAlbum.mover_album(datos.id_album, datos.id_nuevo_padre, current_user_id)
     if not exito:
         raise HTTPException(status_code=400, detail=str(res))
     return {"mensaje": res}
