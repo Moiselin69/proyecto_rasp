@@ -1,239 +1,240 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:intl/intl.dart';
-import '../models/recursos.dart'; // O recurso.dart
+import 'package:video_player/video_player.dart';
+import 'package:chewie/chewie.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:http/http.dart' as http;
+import '../models/recursos.dart';
 import '../services/api_service.dart';
 
-class DetalleFotoScreen extends StatefulWidget {
+class DetalleRecursoScreen extends StatefulWidget {
   final Recurso recurso;
   final String token;
 
-  const DetalleFotoScreen({
-    Key? key,
-    required this.recurso,
-    required this.token,
-  }) : super(key: key);
+  const DetalleRecursoScreen({Key? key, required this.recurso, required this.token}) : super(key: key);
 
   @override
-  _DetalleFotoScreenState createState() => _DetalleFotoScreenState();
+  _DetalleRecursoScreenState createState() => _DetalleRecursoScreenState();
 }
 
-class _DetalleFotoScreenState extends State<DetalleFotoScreen> {
-  final ApiService _apiService = ApiService();
-  late String _nombreActual;
-  late String _fechaRealTexto; // Fecha editable (cuando se tomó la foto)
+class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
+  // Controladores de Video
+  VideoPlayerController? _videoPlayerController;
+  ChewieController? _chewieController;
+
+  // Controladores de Audio
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  bool _isPlayingAudio = false;
+  Duration _duration = Duration.zero;
+  Duration _position = Duration.zero;
+
+  // Contenido de Texto
+  Future<String>? _futureTexto;
 
   @override
   void initState() {
     super.initState();
-    _nombreActual = widget.recurso.nombre;
-    
-    _fechaRealTexto = _formatearFechaBonita(widget.recurso.fechaReal.toString());
+    _inicializarRecurso();
   }
 
-  // --- LÓGICA PARA EDITAR NOMBRE ---
-  void _editarNombre() {
-    TextEditingController controller = TextEditingController(text: _nombreActual);
-    
-    showDialog(
-      context: context,
-      // CAMBIO 1: Renombramos 'context' a 'dialogContext' para no confundirnos
-      builder: (dialogContext) => AlertDialog(
-        title: Text("Renombrar archivo"),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: InputDecoration(hintText: "Nuevo nombre"),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext), 
-            child: Text("Cancelar")
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              if (controller.text.isNotEmpty) {
-                final nuevoNombre = controller.text;
-              
-                final messenger = ScaffoldMessenger.of(context);
-                
-                // 1. Cerramos el diálogo usando su propio contexto
-                Navigator.pop(dialogContext); 
+  void _inicializarRecurso() {
+    // CAMBIO IMPORTANTE: Usamos tu método getUrlCompleta o concatenamos directamente
+    // Usamos ApiService.baseUrl + recurso.urlVisualizacion
+    final String urlCompleta = "${ApiService.baseUrl}${widget.recurso.urlVisualizacion}";
 
-                // 2. Llamada asíncrona
-                bool exito = await _apiService.editarNombre(
-                    widget.token, widget.recurso.id, nuevoNombre);
-                
-                // 3. Verificamos si la PANTALLA DE FONDO sigue viva
-                if (!mounted) return; 
-
-                // 4. Resultado
-                if (exito) {
-                  setState(() => _nombreActual = nuevoNombre);
-                  
-                  // --- USAMOS LA VARIABLE 'messenger' GUARDADA ---
-                  // Ya no usamos 'ScaffoldMessenger.of(context)' aquí porque podría fallar
-                  messenger.showSnackBar(
-                      SnackBar(
-                        content: Row(
-                          children: [
-                            Icon(Icons.check_circle, color: Colors.white),
-                            SizedBox(width: 10),
-                            Expanded(child: Text("Nombre cambiado correctamente")),
-                          ],
-                        ),
-                        backgroundColor: Colors.green,
-                        behavior: SnackBarBehavior.floating,
-                        duration: Duration(seconds: 2),
-                      )
-                  );
-                } else {
-                   messenger.showSnackBar(
-                      SnackBar(
-                        content: Text("Error: No se pudo cambiar el nombre"), 
-                        backgroundColor: Colors.red
-                      )
-                   );
-                }
-              }
-            },
-            child: Text("Guardar"),
-          ),
-        ],
-      ),
-    );
+    switch (widget.recurso.tipo) {
+      case "VIDEO":
+        _inicializarVideo(urlCompleta);
+        break;
+      case "AUDIO":
+        _inicializarAudio(urlCompleta);
+        break;
+      case "ARCHIVO": 
+        // Si el tipo es genérico "ARCHIVO", intentamos ver si es texto por su extensión (opcional)
+        // O simplemente intentamos cargarlo como texto
+        _futureTexto = _cargarTexto(urlCompleta);
+        break;
+    }
   }
 
-  // --- LÓGICA PARA EDITAR FECHA ---
-  void _editarFecha() async {
-    // 1. Elegir Fecha
-    DateTime? fecha = await showDatePicker(
-      context: context,
-      initialDate: DateTime.now(),
-      firstDate: DateTime(2000),
-      lastDate: DateTime.now(),
-      locale: const Locale("es", "ES"),
+  // --- LÓGICA DE VIDEO ---
+  Future<void> _inicializarVideo(String url) async {
+    _videoPlayerController = VideoPlayerController.networkUrl(
+      Uri.parse(url),
+      httpHeaders: {"Authorization": "Bearer ${widget.token}"}, 
     );
 
-    if (fecha == null) return;
-    if (!mounted) return;
-
-    // 2. Elegir Hora
-    TimeOfDay? hora = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.now(),
-    );
-
-    if (hora == null) return;
-
-    // Combinar fecha y hora
-    DateTime fechaFinal = DateTime(
-      fecha.year, fecha.month, fecha.day, hora.hour, hora.minute
-    );
-
-    // --- CAMBIO CLAVE: Guardamos el mensajero antes de llamar a la API ---
-    final messenger = ScaffoldMessenger.of(context);
-
-    // 3. Llamada a la API
-    bool exito = await _apiService.editarFecha(
-        widget.token, widget.recurso.id, fechaFinal);
-
-    if (!mounted) return;
-
-    // 4. Resultado con Notificación Idéntica al Nombre
-    if (exito) {
-      setState(() {
-        _fechaRealTexto = DateFormat('yyyy-MM-dd HH:mm').format(fechaFinal);
-      });
-
-      // Notificación VERDE y BONITA
-      messenger.showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                Icon(Icons.check_circle, color: Colors.white),
-                SizedBox(width: 10),
-                Expanded(child: Text("Fecha real actualizada")),
-              ],
-            ),
-            backgroundColor: Colors.green,
-            behavior: SnackBarBehavior.floating,
-            duration: Duration(seconds: 2),
-          )
+    try {
+      await _videoPlayerController!.initialize();
+      _chewieController = ChewieController(
+        videoPlayerController: _videoPlayerController!,
+        autoPlay: true,
+        looping: false,
+        aspectRatio: _videoPlayerController!.value.aspectRatio,
+        errorBuilder: (context, errorMessage) {
+          return Center(child: Text("Error al reproducir video: $errorMessage", style: TextStyle(color: Colors.white)));
+        },
       );
-    } else {
-      // Notificación de ERROR (por si acaso)
-      messenger.showSnackBar(
-          SnackBar(
-            content: Text("Error al actualizar la fecha"),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-          )
+      setState(() {});
+    } catch (e) {
+      print("Error inicializando video: $e");
+    }
+  }
+
+  // --- LÓGICA DE AUDIO ---
+  void _inicializarAudio(String url) {
+    _audioPlayer.onPlayerStateChanged.listen((state) {
+      if (mounted) setState(() => _isPlayingAudio = state == PlayerState.playing);
+    });
+
+    _audioPlayer.onDurationChanged.listen((newDuration) {
+      if (mounted) setState(() => _duration = newDuration);
+    });
+
+    _audioPlayer.onPositionChanged.listen((newPosition) {
+      if (mounted) setState(() => _position = newPosition);
+    });
+    
+    // Configurar la fuente (UrlSource es parte de audioplayers ^5.x)
+    // Nota: Si tu servidor requiere headers para el audio, AudioPlayers puede tener limitaciones.
+    // A veces es necesario pasar el token en la URL (?token=...) si la librería no soporta headers.
+    _audioPlayer.setSourceUrl(url); 
+  }
+
+  // --- LÓGICA DE TEXTO ---
+  Future<String> _cargarTexto(String url) async {
+    try {
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {"Authorization": "Bearer ${widget.token}"},
       );
+      if (response.statusCode == 200) {
+        return response.body;
+      } else {
+        return "No se pudo cargar el archivo. Código: ${response.statusCode}";
+      }
+    } catch (e) {
+      return "Error de conexión: $e";
     }
   }
 
   @override
-  Widget build(BuildContext context) {
-    final fullUrl = "${ApiService.baseUrl}${widget.recurso.urlVisualizacion}";
+  void dispose() {
+    _videoPlayerController?.dispose();
+    _chewieController?.dispose();
+    _audioPlayer.dispose();
+    super.dispose();
+  }
 
+  @override
+  Widget build(BuildContext context) {
+    // CAMBIO: Usamos 'nombre' en lugar de 'nombreOriginal'
     return Scaffold(
       backgroundColor: Colors.black,
-      body: Stack(
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        iconTheme: IconThemeData(color: Colors.white),
+        title: Text(widget.recurso.nombre, style: TextStyle(color: Colors.white)),
+      ),
+      body: Center(
+        child: _buildContenido(),
+      ),
+    );
+  }
+
+  Widget _buildContenido() {
+    // Construimos la URL igual que arriba
+    final String urlImagen = "${ApiService.baseUrl}${widget.recurso.urlVisualizacion}";
+
+    switch (widget.recurso.tipo) {
+      case "IMAGEN":
+        return InteractiveViewer(
+          child: CachedNetworkImage(
+            imageUrl: urlImagen,
+            httpHeaders: {"Authorization": "Bearer ${widget.token}"},
+            placeholder: (context, url) => CircularProgressIndicator(),
+            errorWidget: (context, url, error) => Icon(Icons.error, color: Colors.white),
+            fit: BoxFit.contain,
+          ),
+        );
+
+      case "VIDEO":
+        if (_chewieController != null && _videoPlayerController!.value.isInitialized) {
+          return Chewie(controller: _chewieController!);
+        } else {
+          return Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 10),
+              Text("Cargando video...", style: TextStyle(color: Colors.white)),
+            ],
+          );
+        }
+
+      case "AUDIO":
+        return _buildReproductorAudio();
+
+      case "ARCHIVO":
+        return _buildVisorTexto();
+
+      default:
+        return Text("Tipo de archivo no soportado", style: TextStyle(color: Colors.white));
+    }
+  }
+
+  Widget _buildReproductorAudio() {
+    return Container(
+      padding: EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.grey[900],
+        borderRadius: BorderRadius.circular(20),
+      ),
+      width: 300,
+      height: 250,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // 1. IMAGEN
-          Center(
-            child: InteractiveViewer(
-              minScale: 0.5, maxScale: 4.0,
-              child: CachedNetworkImage(
-                imageUrl: fullUrl,
-                httpHeaders: {"Authorization": "Bearer ${widget.token}"},
-                placeholder: (context, url) => CircularProgressIndicator(color: Colors.white),
-                errorWidget: (context, url, error) => Icon(Icons.error, color: Colors.white),
-                fit: BoxFit.contain,
-              ),
-            ),
+          Icon(Icons.music_note, size: 60, color: Colors.amber),
+          SizedBox(height: 20),
+          // CAMBIO: Usamos 'nombre'
+          Text(
+            widget.recurso.nombre, 
+            style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold), 
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis
           ),
-
-          // 2. BOTÓN ATRÁS
-          Positioned(
-            top: 40, left: 10,
-            child: IconButton(
-              icon: Icon(Icons.arrow_back, color: Colors.white, size: 30),
-              onPressed: () => Navigator.pop(context),
-            ),
+          SizedBox(height: 20),
+          Slider(
+            activeColor: Colors.amber,
+            inactiveColor: Colors.grey,
+            min: 0,
+            max: _duration.inSeconds.toDouble(),
+            value: _position.inSeconds.toDouble().clamp(0, _duration.inSeconds.toDouble()),
+            onChanged: (value) async {
+              final position = Duration(seconds: value.toInt());
+              await _audioPlayer.seek(position);
+            },
           ),
-
-          // 3. PANEL DE DETALLES
-          DraggableScrollableSheet(
-            initialChildSize: 0.1, minChildSize: 0.1, maxChildSize: 0.6,
-            builder: (BuildContext context, ScrollController scrollController) {
-              return Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-                ),
-                child: ListView(
-                  controller: scrollController,
-                  padding: EdgeInsets.all(20),
-                  children: [
-                    Center(child: Container(width: 40, height: 5, color: Colors.grey[300])),
-                    SizedBox(height: 20),
-                    Text("Detalles", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-                    SizedBox(height: 20),
-
-                    // EDITABLES
-                    _buildEditableItem(Icons.edit, "Nombre", _nombreActual, _editarNombre),
-                    _buildEditableItem(Icons.event, "Fecha Real (Editable)", _fechaRealTexto, _editarFecha),
-                    
-                    Divider(),
-                    
-                    // FIJOS (Aquí añadimos la fecha de subida)
-                    _buildFijoItem(Icons.cloud_upload, "Fecha de Subida", _formatearFechaBonita(widget.recurso.fechaSubida.toString())),
-                    _buildFijoItem(Icons.category, "Tipo", widget.recurso.tipo),
-                  ],
-                ),
-              );
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(_formatTime(_position), style: TextStyle(color: Colors.grey)),
+              Text(_formatTime(_duration), style: TextStyle(color: Colors.grey)),
+            ],
+          ),
+          SizedBox(height: 10),
+          IconButton(
+            iconSize: 60,
+            icon: Icon(_isPlayingAudio ? Icons.pause_circle_filled : Icons.play_circle_filled, color: Colors.amber),
+            onPressed: () async {
+              if (_isPlayingAudio) {
+                await _audioPlayer.pause();
+              } else {
+                final String url = "${ApiService.baseUrl}${widget.recurso.urlVisualizacion}";
+                await _audioPlayer.play(UrlSource(url));
+              }
             },
           ),
         ],
@@ -241,57 +242,43 @@ class _DetalleFotoScreenState extends State<DetalleFotoScreen> {
     );
   }
 
-  Widget _buildEditableItem(IconData icon, String label, String value, VoidCallback onEdit) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: Row(
-        children: [
-          Icon(Icons.edit_note, color: Colors.blue, size: 28),
-          SizedBox(width: 15),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label, style: TextStyle(color: Colors.grey, fontSize: 12)),
-                Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-              ],
+  Widget _buildVisorTexto() {
+    return FutureBuilder<String>(
+      future: _futureTexto,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return CircularProgressIndicator();
+        } else if (snapshot.hasError) {
+          return Padding(
+            padding: EdgeInsets.all(20),
+            child: Text("Error: ${snapshot.error}", style: TextStyle(color: Colors.red), textAlign: TextAlign.center),
+          );
+        } else {
+          return Container(
+            margin: EdgeInsets.all(16),
+            padding: EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8)
             ),
-          ),
-          IconButton(icon: Icon(icon, color: Colors.blueAccent), onPressed: onEdit)
-        ],
-      ),
+            width: double.infinity,
+            height: double.infinity,
+            child: SingleChildScrollView(
+              child: Text(
+                snapshot.data ?? "Archivo vacío",
+                style: TextStyle(color: Colors.black, fontSize: 14, fontFamily: 'Courier'),
+              ),
+            ),
+          );
+        }
+      },
     );
   }
 
-  Widget _buildFijoItem(IconData icon, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12.0),
-      child: Row(
-        children: [
-          Icon(icon, color: Colors.grey[600], size: 28),
-          SizedBox(width: 15),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label, style: TextStyle(color: Colors.grey, fontSize: 12)),
-                Text(value, style: TextStyle(fontSize: 16)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-  String _formatearFechaBonita(String? fechaRaw) {
-    if (fechaRaw == null || fechaRaw.isEmpty || fechaRaw == "null") {
-      return "Sin fecha";
-    }
-    try {
-      DateTime fecha = DateTime.parse(fechaRaw);
-      return DateFormat('dd-MM-yyyy HH:mm').format(fecha);
-    } catch (e) {
-      return fechaRaw;
-    }
+  String _formatTime(Duration duration) {
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    final twoDigitMinutes = twoDigits(duration.inMinutes.remainder(60));
+    final twoDigitSeconds = twoDigits(duration.inSeconds.remainder(60));
+    return "$twoDigitMinutes:$twoDigitSeconds";
   }
 }

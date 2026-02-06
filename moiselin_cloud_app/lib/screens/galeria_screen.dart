@@ -444,7 +444,7 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                               if (_modoSeleccion) {
                                 _toggleSeleccionRecurso(recurso.id);
                               } else {
-                                Navigator.push(context, MaterialPageRoute(builder: (_) => DetalleFotoScreen(recurso: recurso, token: widget.token))).then((_) => _cargarDatos());
+                                Navigator.push(context, MaterialPageRoute(builder: (_) => DetalleRecursoScreen(recurso: recurso, token: widget.token))).then((_) => _cargarDatos());
                               }
                             },
                             child: Stack(
