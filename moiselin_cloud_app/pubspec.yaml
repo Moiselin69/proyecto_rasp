@@ -18,6 +18,10 @@ dependencies:
   shared_preferences: ^2.2.2
   cached_network_image: ^3.3.1
   image_picker: ^1.0.7
+  dio: ^5.0.0
+  path_provider: ^2.0.0
+  gallery_saver_plus: ^3.0.0
+  permission_handler: ^10.0.0
   
   intl: ^0.20.2 
   flutter_localizations:

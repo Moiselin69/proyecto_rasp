@@ -7,6 +7,10 @@
 <string>Necesitamos acceso a tu cámara para tomar fotos.</string>
 <key>NSMicrophoneUsageDescription</key>
 <string>Necesitamos acceso al micrófono para grabar videos.</string>
+<key>NSPhotoLibraryAddUsageDescription</key>
+<string>Necesitamos acceso para guardar tus descargas en la galería.</string>
+<key>NSPhotoLibraryUsageDescription</key>
+<string>Necesitamos acceso para ver y guardar fotos.</string>
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>

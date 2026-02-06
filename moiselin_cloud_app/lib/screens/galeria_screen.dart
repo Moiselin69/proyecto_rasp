@@ -8,6 +8,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as path;
 import 'detalle_foto_screen.dart';
+import "../services/download_service.dart";
 
 class GaleriaScreen extends StatefulWidget {
   final String token;
@@ -26,7 +27,7 @@ class GaleriaScreen extends StatefulWidget {
 
 class _GaleriaScreenState extends State<GaleriaScreen> {
   final ApiService _apiService = ApiService();
-  
+  final DownloadService _downloadService = DownloadService();
   bool _cargando = true;
   String _filtroSeleccionado = "Todos"; 
   List<Recurso> _todosLosRecursos = []; 
@@ -63,6 +64,61 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
     } catch (e) {
       print("Error cargando datos: $e");
       if (mounted) setState(() => _cargando = false);
+    }
+  }
+
+  void _accionDescargarSeleccion() async {
+    if (_recursosSeleccionados.isEmpty) return;
+
+    // Mostrar aviso de inicio
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text("Iniciando descarga de ${_recursosSeleccionados.length} archivos..."))
+    );
+
+    int exitoCount = 0;
+    
+    // Recorremos los IDs seleccionados
+    for (int id in _recursosSeleccionados) {
+      try {
+        // Buscamos el objeto Recurso completo en la lista que ya tenemos cargada
+        // Usamos firstWhere con orElse por seguridad
+        final recurso = _todosLosRecursos.firstWhere((r) => r.id == id, orElse: () => throw Exception("No encontrado"));
+        
+        // Construimos la URL igual que en detalle
+        String urlCompleta = "${ApiService.baseUrl}${recurso.urlVisualizacion}";
+        if (recurso.tipo == "VIDEO" && urlCompleta.contains("https://")) {
+          urlCompleta = urlCompleta.replaceFirst("https://", "http://");
+        }
+
+        // Preparamos el nombre con extensión
+        String nombreFinal = recurso.nombre;
+        if (!nombreFinal.contains(".")) {
+          switch (recurso.tipo) {
+            case "VIDEO": nombreFinal += ".mp4"; break;
+            case "IMAGEN": nombreFinal += ".jpg"; break;
+            case "AUDIO": nombreFinal += ".mp3"; break;
+            case "ARCHIVO": nombreFinal += ".pdf"; break;
+          }
+        }
+
+        // Llamamos al servicio (esperamos a que termine uno para empezar el otro y no saturar)
+        bool ok = await _downloadService.descargarYGuardar(urlCompleta, nombreFinal, recurso.tipo, widget.token);
+        if (ok) exitoCount++;
+
+      } catch (e) {
+        print("Error al descargar recurso $id: $e");
+      }
+    }
+
+    // Resultado final
+    if (mounted) {
+      _limpiarSeleccion(); // Salimos del modo selección al terminar
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Descarga finalizada: $exitoCount guardados correctamente"),
+          backgroundColor: exitoCount > 0 ? Colors.green : Colors.orange,
+        )
+      );
     }
   }
 
@@ -368,6 +424,11 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
           : null,
         actions: _modoSeleccion 
           ? [
+              if (_recursosSeleccionados.isNotEmpty) // Solo mostramos si hay archivos (no carpetas)
+                IconButton(
+                  icon: Icon(Icons.download), 
+                  onPressed: _accionDescargarSeleccion
+                ),
               IconButton(icon: Icon(Icons.drive_file_move), onPressed: _accionMover),
               IconButton(
                 icon: Icon(Icons.share), 

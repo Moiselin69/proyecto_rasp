@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart'; 
 import '../models/recursos.dart';
 import '../services/api_service.dart';
+import '../services/download_service.dart';
 
 class DetalleRecursoScreen extends StatefulWidget {
   final Recurso recurso;
@@ -19,6 +20,8 @@ class DetalleRecursoScreen extends StatefulWidget {
 }
 
 class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
+  final DownloadService _downloadService = DownloadService();
+  bool _descargando = false;
   final ApiService _apiService = ApiService();
   
   // Variables locales para edición (para ver los cambios al instante)
@@ -56,6 +59,48 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
       case "VIDEO": _inicializarVideo(urlCompleta); break;
       case "AUDIO": _inicializarAudio(urlCompleta); break;
       case "ARCHIVO": _futureTexto = _cargarTexto(urlCompleta); break;
+    }
+  }
+
+  void _descargarArchivo() async {
+    setState(() => _descargando = true);
+
+    // Construir la URL completa
+    String urlCompleta = "${ApiService.baseUrl}${widget.recurso.urlVisualizacion}";
+    
+    // Parche HTTP si lo necesitas (igual que en tu init)
+    if (widget.recurso.tipo == "VIDEO" && urlCompleta.contains("https://")) {
+      urlCompleta = urlCompleta.replaceFirst("https://", "http://");
+    }
+
+    // Nombre del archivo (puedes usar el nombre del recurso + extensión)
+    // Truco: Añadir extensión si el nombre no la tiene para que Android lo reconozca
+    String nombreFinal = widget.recurso.nombre;
+    if (!nombreFinal.contains(".")) {
+    switch (widget.recurso.tipo) {
+      case "VIDEO": nombreFinal += ".mp4"; break;
+      case "IMAGEN": nombreFinal += ".jpg"; break;
+      case "AUDIO": nombreFinal += ".mp3"; break; // <--- Importante para música
+      case "ARCHIVO": nombreFinal += ".pdf"; break; // Asumimos PDF por defecto o déjalo sin nada
+    }
+  }
+
+    bool exito = await _downloadService.descargarYGuardar(
+      urlCompleta, 
+      nombreFinal, 
+      widget.recurso.tipo, 
+      widget.token
+    );
+
+    setState(() => _descargando = false);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(exito ? "Guardado en la galería" : "Error al descargar"),
+          backgroundColor: exito ? Colors.green : Colors.red,
+        )
+      );
     }
   }
 
@@ -236,6 +281,7 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
                       children: [
                         _buildActionButton(Icons.share, "Compartir", Colors.blue, () {}),
                         _buildActionButton(Icons.delete, "Eliminar", Colors.red, _borrarRecurso),
+                        _buildActionButton(Icons.download, "Descargar", Colors.green, _descargarArchivo),
                       ],
                     ),
                     SizedBox(height: 50),
