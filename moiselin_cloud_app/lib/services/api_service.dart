@@ -27,15 +27,17 @@ class ApiService {
   Future<String?> login(String email, String password) async {
     try {
       final response = await http.post(
-        Uri.parse('$baseUrl/token'),
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: {'username': email, 'password': password},
+        Uri.parse('$baseUrl/persona/login'), headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'correo': email,
+          'contra': password 
+        }),
       );
-
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        return data['access_token']; // Devolvemos el token
+        return data['access_token']; 
       } else {
+        print("Error Login: ${response.body}"); // Para ver qué falla si no entra
         return null;
       }
     } catch (e) {

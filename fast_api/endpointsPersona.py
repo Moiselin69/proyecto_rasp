@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi.security import OAuth2PasswordRequestForm
 import consultasPersona
 import consultasSeguridad
 import funcionesSeguridad

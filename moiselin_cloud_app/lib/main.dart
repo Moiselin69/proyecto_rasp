@@ -1,9 +1,22 @@
+import 'dart:io'; // <--- 1. IMPORTANTE: Necesario para HttpOverrides
 import 'package:flutter/material.dart';
 import 'screens/login_screen.dart';
 import 'screens/galeria_screen.dart';
 import 'services/api_service.dart';
 
+// 2. CLASE PARA IGNORAR ERRORES DE CERTIFICADO (Solo para desarrollo)
+class MyHttpOverrides extends HttpOverrides {
+  @override
+  HttpClient createHttpClient(SecurityContext? context) {
+    return super.createHttpClient(context)
+      ..badCertificateCallback = (X509Certificate cert, String host, int port) => true;
+  }
+}
+
 void main() {
+  // 3. ACTIVAR EL OVERRIDE ANTES DE ARRANCAR LA APP
+  HttpOverrides.global = MyHttpOverrides();
+  
   runApp(MyApp());
 }
 
@@ -12,10 +25,11 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Moiselin Cloud',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
-      home: CheckAuthScreen(), // <--- Arrancamos aquí en vez de LoginScreen
+      home: CheckAuthScreen(), 
     );
   }
 }
@@ -35,7 +49,6 @@ class _CheckAuthScreenState extends State<CheckAuthScreen> {
   }
 
   void _checkSession() async {
-    // 1. Intentamos leer los datos guardados
     final session = await _apiService.obtenerSesion();
     final token = session['token'];
     final email = session['email'];
@@ -43,7 +56,9 @@ class _CheckAuthScreenState extends State<CheckAuthScreen> {
 
     if (token != null && email != null && password != null) {
       try {
-        final albumes = await _apiService.obtenerMisAlbumes(token);
+        // Probamos si el token sigue vivo
+        await _apiService.obtenerMisAlbumes(token);
+        
         if (mounted) {
           Navigator.pushReplacement(
             context,
@@ -52,11 +67,11 @@ class _CheckAuthScreenState extends State<CheckAuthScreen> {
           return;
         }
       } catch (e) {
-        print("Token caducado o error, intentando re-login automático...");
+        print("Token caducado, re-logueando...");
+        // Si falla, intentamos login silencioso
         String? newToken = await _apiService.login(email, password);
         
         if (newToken != null) {
-          // Actualizamos el token guardado
           await _apiService.guardarSesion(email, password, newToken);
           if (mounted) {
             Navigator.pushReplacement(
@@ -69,7 +84,6 @@ class _CheckAuthScreenState extends State<CheckAuthScreen> {
       }
     }
 
-    // 4. Si todo falla o no hay datos, vamos al Login normal
     if (mounted) {
       Navigator.pushReplacement(
         context,
@@ -80,11 +94,8 @@ class _CheckAuthScreenState extends State<CheckAuthScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Pantalla de carga mientras comprobamos
     return Scaffold(
-      body: Center(
-        child: CircularProgressIndicator(),
-      ),
+      body: Center(child: CircularProgressIndicator()),
     );
   }
 }
