@@ -86,10 +86,6 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
         
         // Construimos la URL igual que en detalle
         String urlCompleta = "${ApiService.baseUrl}${recurso.urlVisualizacion}";
-        if (recurso.tipo == "VIDEO" && urlCompleta.contains("https://")) {
-          urlCompleta = urlCompleta.replaceFirst("https://", "http://");
-        }
-
         // Preparamos el nombre con extensión
         String nombreFinal = recurso.nombre;
         if (!nombreFinal.contains(".")) {

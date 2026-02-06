@@ -50,11 +50,6 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
   void _inicializarRecurso() {
     String urlCompleta = "${ApiService.baseUrl}${widget.recurso.urlVisualizacion}";
     
-    // Parche HTTP
-    if (widget.recurso.tipo == "VIDEO" && urlCompleta.contains("https://")) {
-      urlCompleta = urlCompleta.replaceFirst("https://", "http://");
-    }
-
     switch (widget.recurso.tipo) {
       case "VIDEO": _inicializarVideo(urlCompleta); break;
       case "AUDIO": _inicializarAudio(urlCompleta); break;
@@ -68,11 +63,6 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
     // Construir la URL completa
     String urlCompleta = "${ApiService.baseUrl}${widget.recurso.urlVisualizacion}";
     
-    // Parche HTTP si lo necesitas (igual que en tu init)
-    if (widget.recurso.tipo == "VIDEO" && urlCompleta.contains("https://")) {
-      urlCompleta = urlCompleta.replaceFirst("https://", "http://");
-    }
-
     // Nombre del archivo (puedes usar el nombre del recurso + extensión)
     // Truco: Añadir extensión si el nombre no la tiene para que Android lo reconozca
     String nombreFinal = widget.recurso.nombre;

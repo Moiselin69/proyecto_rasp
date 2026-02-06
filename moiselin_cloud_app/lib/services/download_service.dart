@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:gallery_saver_plus/gallery_saver.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -7,19 +8,37 @@ import 'package:permission_handler/permission_handler.dart';
 class DownloadService {
   
   Future<bool> descargarYGuardar(String url, String nombreArchivo, String tipo, String token) async {
-    try {
-      // 1. Pedir permisos generales (Importante para Android 9 o inferior)
-      if (Platform.isAndroid) {
+  try {
+    // 1. GESTIÓN DE PERMISOS POTENTE
+    if (Platform.isAndroid) {
+      // Intentamos pedir el permiso de "Gestionar almacenamiento" (Android 11+)
+      var status = await Permission.manageExternalStorage.status;
+      if (!status.isGranted) {
+        await Permission.manageExternalStorage.request();
+      }
+      
+      // Por si acaso es un Android antiguo (menor a 11), pedimos el normal
+      if (!await Permission.manageExternalStorage.isGranted) {
         await Permission.storage.request();
       }
+    }
 
-      // 2. Ruta temporal de descarga (Descargamos aquí primero siempre)
       final tempDir = await getTemporaryDirectory();
       final tempPath = "${tempDir.path}/$nombreArchivo";
 
-      // 3. Descargar usando DIO con tu Token
       print("Iniciando descarga de: $url");
-      await Dio().download(
+
+      // --- CONFIGURACIÓN ESPECIAL PARA HTTPS ---
+      final dio = Dio();
+      // Esto permite descargar de HTTPS con certificados autofirmados (tu servidor local)
+      (dio.httpClientAdapter as IOHttpClientAdapter).createHttpClient = () {
+        final client = HttpClient();
+        client.badCertificateCallback = (X509Certificate cert, String host, int port) => true;
+        return client;
+      };
+      // ----------------------------------------
+
+      await dio.download(
         url,
         tempPath,
         options: Options(headers: {"Authorization": "Bearer $token"}),
@@ -27,7 +46,6 @@ class DownloadService {
 
       // 4. Mover el archivo a su destino final según el tipo
       bool exito = false;
-
       if (tipo == "VIDEO") {
         exito = (await GallerySaver.saveVideo(tempPath, albumName: "Moiselin Cloud")) ?? false;
       } 
@@ -35,15 +53,11 @@ class DownloadService {
         exito = (await GallerySaver.saveImage(tempPath, albumName: "Moiselin Cloud")) ?? false;
       } 
       else {
-        // --- AQUÍ ESTÁ LA MAGIA PARA AUDIO Y ARCHIVOS ---
         exito = await _guardarEnDescargas(tempPath, nombreArchivo);
       }
 
-      // 5. Limpieza: Borrar el archivo temporal
       final fileTemp = File(tempPath);
-      if (await fileTemp.exists()) {
-        await fileTemp.delete();
-      }
+      if (await fileTemp.exists()) await fileTemp.delete();
 
       return exito;
 
