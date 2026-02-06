@@ -106,6 +106,10 @@ def ver_archivo_recurso(id_recurso: int, size:str = "full",current_user_id: int 
     if not exito or not res:
         raise HTTPException(status_code=404, detail="Recurso no encontrado o acceso denegado")
     ruta_original = res['enlace']
+    if res['tipo'] == "VIDEO":
+        print(f"--- Solicitud Video {id_recurso} ---")
+        print(f"Size solicitado: {size}")
+        print(f"Ruta original: {ruta_original}")
     if size == "small" and (res['tipo'] == "IMAGEN" or res['tipo'] == "VIDEO"):
         ruta_miniatura = ruta_original.replace("uploads", "thumbnails")
         if os.path.exists(ruta_miniatura):

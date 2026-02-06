@@ -437,7 +437,8 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                           final recurso = _recursosFiltrados[index - _albumesVisibles.length];
                           final isSelected = _recursosSeleccionados.contains(recurso.id);
                           final urlImagen = "${ApiService.baseUrl}${recurso.urlThumbnail}";
-                          
+                          final urlQueIntentaCargar = recurso.getUrlCompleta(ApiService.baseUrl, usarThumbnail: true);
+                          print("FLUTTER PIDE: $urlQueIntentaCargar");
                           return GestureDetector(
                             onLongPress: () => _toggleSeleccionRecurso(recurso.id),
                             onTap: () {
