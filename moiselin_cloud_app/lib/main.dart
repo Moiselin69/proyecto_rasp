@@ -13,10 +13,10 @@ class MyHttpOverrides extends HttpOverrides {
   }
 }
 
-void main() {
-  // 3. ACTIVAR EL OVERRIDE ANTES DE ARRANCAR LA APP
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   HttpOverrides.global = MyHttpOverrides();
-  
+  await ApiService.cargarUrl();
   runApp(MyApp());
 }
 

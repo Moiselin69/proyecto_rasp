@@ -67,6 +67,56 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
     }
   }
 
+  void _mostrarConfiguracionIP() {
+    final ipController = TextEditingController(text: ApiService.baseUrl);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text("Configurar Servidor"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text("Cambiar dirección del servidor:"),
+            SizedBox(height: 10),
+            TextField(
+              controller: ipController,
+              decoration: InputDecoration(
+                labelText: "IP o Dominio",
+                hintText: "http://...",
+                border: OutlineInputBorder(),
+                suffixIcon: Icon(Icons.dns),
+              ),
+              keyboardType: TextInputType.url,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text("Cancelar"),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              if (ipController.text.isNotEmpty) {
+                // 1. Guardamos la nueva URL
+                await ApiService.guardarUrl(ipController.text);
+                Navigator.pop(ctx);
+                
+                // 2. Refrescamos la pantalla para probar la conexión
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text("Conectando a: ${ApiService.baseUrl}..."))
+                );
+                _cargarDatos(); // Reintentamos cargar con la nueva IP
+              }
+            },
+            child: Text("Guardar y Conectar"),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _accionDescargarSeleccion() async {
     // Si solo has seleccionado carpetas, no hacemos nada
     if (_recursosSeleccionados.isEmpty) {
@@ -463,6 +513,7 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
               IconButton(icon: Icon(Icons.delete), onPressed: _accionBorrar),
             ]
           : [
+              IconButton(icon: Icon(Icons.settings), onPressed: _mostrarConfiguracionIP, tooltip: "Configurar IP",),
               IconButton(icon: Icon(Icons.refresh), onPressed: _cargarDatos),
               IconButton(icon: Icon(Icons.exit_to_app), onPressed: _cerrarSesion),
             ],

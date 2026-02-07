@@ -7,8 +7,33 @@ import "../models/album.dart";
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class ApiService {
-  static const String baseUrl = "https://192.168.1.6:8000"; 
+  static String baseUrl = "http://192.168.1.6:8000";
   final _storage = const FlutterSecureStorage();
+
+  static Future<void> cargarUrl() async {
+    final prefs = await SharedPreferences.getInstance();
+    final urlGuardada = prefs.getString('api_base_url');
+    if (urlGuardada != null && urlGuardada.isNotEmpty) {
+      baseUrl = urlGuardada;
+      print("URL Base cargada: $baseUrl");
+    }
+  }
+
+  static Future<void> guardarUrl(String nuevaUrl) async {
+    // Pequeña limpieza por si al usuario se le olvida el http o la barra final
+    String urlFinal = nuevaUrl.trim();
+    if (urlFinal.endsWith("/")) {
+      urlFinal = urlFinal.substring(0, urlFinal.length - 1);
+    }
+    
+    // Guardamos en memoria
+    baseUrl = urlFinal;
+    
+    // Persistimos en disco
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('api_base_url', urlFinal);
+    print("Nueva URL guardada: $baseUrl");
+  }
 
   Future<void> guardarSesion(String email, String password, String token) async {
     await _storage.write(key: 'email', value: email);

@@ -21,7 +21,6 @@ class DetalleRecursoScreen extends StatefulWidget {
 
 class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
   final DownloadService _downloadService = DownloadService();
-  bool _descargando = false;
   final ApiService _apiService = ApiService();
   
   // Variables locales para edición (para ver los cambios al instante)
@@ -58,7 +57,6 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
   }
 
   void _descargarArchivo() async {
-    setState(() => _descargando = true);
 
     // URL base
     String urlCompleta = "${ApiService.baseUrl}${widget.recurso.urlVisualizacion}";
@@ -83,8 +81,6 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
       widget.recurso.tipo, 
       widget.token
     );
-
-    setState(() => _descargando = false);
 
     if (mounted) {
       if (rutaGuardado != null) {
