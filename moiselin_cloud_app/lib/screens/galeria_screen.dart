@@ -10,6 +10,7 @@ import 'package:path/path.dart' as path;
 import 'detalle_foto_screen.dart';
 import "../services/download_service.dart";
 import 'gestionar_amistades_screen.dart';
+import 'configuracion_screen.dart';
 
 class GaleriaScreen extends StatefulWidget {
   final String token;
@@ -44,7 +45,7 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
   bool _mostrarMenuAdmin = false;
   Set<int> _recursosSeleccionados = {};
   Set<int> _albumesSeleccionados = {}; // Nuevo set para carpetas
-  
+
   final List<String> _categorias = ["Todos", "Imagen", "Videos", "Musica", "Otros"];
 
   @override
@@ -160,56 +161,6 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
         _aplicarFiltros(); // Aplicamos el nuevo orden
         Navigator.pop(context); // Cerramos menú
       },
-    );
-  }
-
-  void _mostrarConfiguracionIP() {
-    final ipController = TextEditingController(text: ApiService.baseUrl);
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text("Configurar Servidor"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text("Cambiar dirección del servidor:"),
-            SizedBox(height: 10),
-            TextField(
-              controller: ipController,
-              decoration: InputDecoration(
-                labelText: "IP o Dominio",
-                hintText: "http://...",
-                border: OutlineInputBorder(),
-                suffixIcon: Icon(Icons.dns),
-              ),
-              keyboardType: TextInputType.url,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text("Cancelar"),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              if (ipController.text.isNotEmpty) {
-                // 1. Guardamos la nueva URL
-                await ApiService.guardarUrl(ipController.text);
-                Navigator.pop(ctx);
-                
-                // 2. Refrescamos la pantalla para probar la conexión
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text("Conectando a: ${ApiService.baseUrl}..."))
-                );
-                _cargarDatos(); // Reintentamos cargar con la nueva IP
-              }
-            },
-            child: Text("Guardar y Conectar"),
-          ),
-        ],
-      ),
     );
   }
 
@@ -398,19 +349,32 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
 
   Future<void> _subirArchivoUniversal() async {
     FilePickerResult? result = await FilePicker.platform.pickFiles(allowMultiple: false);
-
     if (result != null && result.files.single.path != null) {
       File file = File(result.files.single.path!);
       String tipo = _obtenerTipoArchivo(file.path);
-
       setState(() => _cargando = true);
       bool exito = await _apiService.subirRecurso(widget.token, file, tipo, idAlbum: widget.parentId);
-
       if (exito) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Archivo subido")));
-        _cargarDatos();
+        bool borrar = await ApiService.getBorrarAlSubir();
+        String mensaje = "Archivo subido correctamente";
+        if (borrar) {
+          try {
+            if (await file.exists()) {
+              await file.delete(); // Borramos el archivo local
+              mensaje = "Subido y borrado del dispositivo para ahorrar espacio";
+            }
+          } catch (e) {
+            print("No se pudo borrar el archivo local: $e");
+          }
+        }
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(mensaje)));
+        }
+        _cargarDatos(); // Recargar la galería
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error al subir")));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error al subir")));
+        }
         setState(() => _cargando = false);
       }
     }
@@ -595,7 +559,7 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                   
                   // ESTAS SON LAS OPCIONES QUE CAEN HACIA ABAJO
                   onSelected: (value) {
-                    if (value == 'config') _mostrarConfiguracionIP();
+                    if (value == 'config') Navigator.push(context,MaterialPageRoute(builder: (context) => const ConfiguracionScreen()),).then((_) {_cargarDatos(); });
                     if (value == 'refresh') _cargarDatos();
                     if (value == 'logout') _cerrarSesion();
                     if (value == 'gestionar_amistades')Navigator.push(context, MaterialPageRoute(builder: (context) => const GestionarAmistadesScreen()));
@@ -608,7 +572,7 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                         children: [
                           Icon(Icons.settings, color: Colors.blueGrey),
                           SizedBox(width: 10),
-                          Text('Configurar Servidor'),
+                          Text('Configuración'),
                         ],
                       ),
                     ),

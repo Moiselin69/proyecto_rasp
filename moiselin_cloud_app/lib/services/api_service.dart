@@ -9,7 +9,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 class ApiService {
   static String baseUrl = "http://192.168.1.6:8000";
   final _storage = const FlutterSecureStorage();
-
+  static const String _keyBorrarAlSubir = 'borrar_recurso_al_subir';
+  
   static Future<void> cargarUrl() async {
     final prefs = await SharedPreferences.getInstance();
     final urlGuardada = prefs.getString('api_base_url');
@@ -363,6 +364,15 @@ class ApiService {
     if (response.statusCode != 200) {
       throw Exception('Error al eliminar amigo: ${response.body}');
     }
+  }
+
+  static Future<bool> getBorrarAlSubir() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyBorrarAlSubir) ?? false;
+  }
+  static Future<void> setBorrarAlSubir(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyBorrarAlSubir, value);
   }
 
 }
