@@ -42,7 +42,6 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
   
   // --- NUEVA LÓGICA DE SELECCIÓN MIXTA ---
   bool _modoSeleccion = false;
-  bool _mostrarMenuAdmin = false;
   Set<int> _recursosSeleccionados = {};
   Set<int> _albumesSeleccionados = {}; // Nuevo set para carpetas
 

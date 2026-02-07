@@ -144,29 +144,49 @@ def cambiar_fecha_recurso(id_recurso:int, fecha:datetime, id_persona:int):
             if 'cursor' in locals(): cursor.close()
             connection.close()
 
-def pedir_compartir_recurso(id_persona: int, id_persona_compartida: int, id_recurso:int):
-    connection = None
-    try: 
-        connection = db.get_connection()
-        if connection.is_connected():
-            cursor = connection.cursor()
-            query = "INSERT INTO Peticion_recurso (id_persona, id_persona_compartida, id_recurso) VALUES (%s, %s, %s)"
-            query_check = "SELECT COUNT(*) FROM Recurso_Persona WHERE id_recurso = %s AND id_persona = %s"
-            valores = (id_persona, id_persona_compartida, id_recurso)
-            valores_check = (id_recurso, id_persona)
-            cursor.execute(query_check, valores_check)
-            if cursor.fetchone()[0] == 0:
-                return (False, "No puedes compartir una recurso que no te pertenece")
-            cursor.execute(query, valores)
-            connection.commit()
-            return (True, "Peticion enviada")
-    except Error as e:
-        print(f"Error en pedir compartir recurso en MySql: {e}")
-        return (False, str(e))
-    finally: 
-        if connection is not None and connection.is_connected():
-            if 'cursor' in locals(): cursor.close()
-            connection.close()    
+def compartir_recurso_bd(id_recurso, id_emisor, id_receptor):
+    conexion = db.conectar_bd()
+    try:
+        with conexion.cursor() as cursor:
+            sql_owner = "SELECT id FROM Recurso WHERE id = %s AND id_persona = %s"
+            cursor.execute(sql_owner, (id_recurso, id_emisor))
+            if not cursor.fetchone():
+                return False, "Error: No puedes compartir un recurso que no es tuyo."
+            sql_amigos = """
+                SELECT 1 FROM Persona_Amiga 
+                WHERE (id_persona_1 = %s AND id_persona_2 = %s) 
+                   OR (id_persona_1 = %s AND id_persona_2 = %s)
+            """
+            cursor.execute(sql_amigos, (id_emisor, id_receptor, id_receptor, id_emisor))
+            es_amigo = cursor.fetchone()
+            if es_amigo:
+                sql_check = "SELECT 1 FROM Recurso_Compartido WHERE id_recurso=%s AND id_emisor=%s AND id_receptor=%s"
+                cursor.execute(sql_check, (id_recurso, id_emisor, id_receptor))
+                if cursor.fetchone():
+                     return False, "Ya habías compartido este recurso con esta persona."
+                sql_insert = "INSERT INTO Recurso_Compartido (id_recurso, id_emisor, id_receptor) VALUES (%s, %s, %s)"
+                cursor.execute(sql_insert, (id_recurso, id_emisor, id_receptor))
+                conexion.commit()
+                return True, "Recurso compartido exitosamente."
+            else:
+                sql_check_pet = """
+                    SELECT 1 FROM Peticion_Recurso 
+                    WHERE id_recurso=%s AND id_persona=%s AND id_persona_compartida=%s
+                """
+                cursor.execute(sql_check_pet, (id_recurso, id_emisor, id_receptor))
+                if cursor.fetchone():
+                    return False, "Ya existe una solicitud pendiente para compartir este archivo."
+                sql_pet = """
+                    INSERT INTO Peticion_Recurso (id_persona, id_persona_compartida, id_recurso, estado) 
+                    VALUES (%s, %s, %s, 'PENDIENTE')
+                """
+                cursor.execute(sql_pet, (id_emisor, id_receptor, id_recurso))
+                conexion.commit()
+                return True, "No sois amigos. Se ha enviado una solicitud para compartir."
+    except Exception as e:
+        return False, str(e)
+    finally:
+        conexion.close()    
 
 def aceptar_compartir_recurso(id_persona: int, id_persona_compartida: int, id_recurso: int):
     connection = None

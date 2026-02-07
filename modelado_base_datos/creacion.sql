@@ -102,6 +102,8 @@ CREATE TABLE Peticion_Recurso(
 	id_persona INT NOT NULL,
 	id_persona_compartida INT NOT NULL,
 	id_recurso INT NOT NULL,
+	estado ENUM('PENDIENTE', 'ACEPTADA', 'RECHAZADA') DEFAULT 'PENDIENTE',
+	fecha_solicitud DATETIME DEFAULT CURRENT_TIMESTAMP,
 	CONSTRAINT pk_peticion_recurso PRIMARY KEY(id_persona,id_persona_compartida,id_recurso),
 	CONSTRAINT fk_peticion_recurso_persona FOREIGN KEY(id_persona) REFERENCES Persona(id) ON DELETE CASCADE,
 	CONSTRAINT fk_peticion_recurso_persona_compartida FOREIGN KEY(id_persona_compartida) REFERENCES Persona(id) ON DELETE CASCADE,
@@ -114,6 +116,17 @@ CREATE TABLE Control_Acceso (
     bloqueado_hasta DATETIME DEFAULT NULL,
     ultimo_intento TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (ip)
+) ENGINE=InnoDB;
+
+CREATE TABLE Recurso_Compartido (
+    id_recurso INT NOT NULL,
+    id_emisor INT NOT NULL,
+    id_receptor INT NOT NULL,
+    fecha_compartido DATETIME DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_recurso_compartido PRIMARY KEY(id_recurso, id_emisor, id_receptor),
+    CONSTRAINT fk_recurso_compartido_recurso FOREIGN KEY (id_recurso) REFERENCES Recurso(id) ON DELETE CASCADE,
+    CONSTRAINT fk_recurso_compartido_emisor FOREIGN KEY (id_emisor) REFERENCES Persona(id) ON DELETE CASCADE,
+    CONSTRAINT fk_recurso_compartido_receptor FOREIGN KEY (id_receptor) REFERENCES Persona(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 DELIMITER //

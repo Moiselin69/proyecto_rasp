@@ -49,3 +49,7 @@ class SolicitudFecha(BaseModel):
 class AlbumMover(BaseModel):
     id_album: int
     id_nuevo_padre: int | None = None
+
+class CompartirRecurso(BaseModel):
+    id_recurso: int
+    id_amigo_receptor: int

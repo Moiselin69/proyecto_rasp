@@ -10,7 +10,7 @@ class ApiService {
   static String baseUrl = "http://192.168.1.6:8000";
   final _storage = const FlutterSecureStorage();
   static const String _keyBorrarAlSubir = 'borrar_recurso_al_subir';
-  
+
   static Future<void> cargarUrl() async {
     final prefs = await SharedPreferences.getInstance();
     final urlGuardada = prefs.getString('api_base_url');
@@ -373,6 +373,31 @@ class ApiService {
   static Future<void> setBorrarAlSubir(bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyBorrarAlSubir, value);
+  }
+
+  static Future<String> compartirRecurso(int idRecurso, int idAmigo) async {
+    final url = Uri.parse('$baseUrl/recurso/compartir');
+    final response = await http.post(
+      url,
+      headers: await _getHeaders(),
+      body: jsonEncode({
+        'id_recurso': idRecurso,
+        'id_amigo_receptor': idAmigo
+      }),
+    );
+
+    // Decodificamos la respuesta
+    final body = jsonDecode(response.body);
+
+    if (response.statusCode == 200) {
+      // Devolvemos el mensaje de éxito del backend 
+      // (Ej: "Recurso compartido exitosamente" o "Solicitud enviada...")
+      return body['mensaje']; 
+    } else {
+      // Manejo de errores mejorado
+      String mensajeError = body['detail'] ?? body['message'] ?? 'Error desconocido';
+      throw Exception(mensajeError);
+    }
   }
 
 }

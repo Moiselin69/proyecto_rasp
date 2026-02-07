@@ -94,10 +94,11 @@ def borrar_recurso(id_recurso: int, current_user_id: int = Depends(funcionesSegu
 
 #~Endpoint para compartir recursos
 @router.post("/recurso/compartir")
-def compartir_recurso_endpoint(datos: modeloDatos.RecursoCompartir, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
-    exito, res = consultasRecursos.pedir_compartir_recurso(current_user_id, datos.id_persona_destino, datos.id_recurso)
-    if not exito: raise HTTPException(status_code=400, detail=str(res))
-    return {"mensaje": res}
+def compartir_recurso(datos: modeloDatos.CompartirRecurso, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+    exito, mensaje = consultasRecursos.compartir_recurso_bd(datos.id_recurso, current_user_id, datos.id_amigo_receptor)
+    if not exito:
+        raise HTTPException(status_code=400, detail=mensaje)
+    return {"mensaje": mensaje}
 
 #~Endpoint para visualizar o descargar un archivo
 @router.get("/recurso/archivo/{id_recurso}")
