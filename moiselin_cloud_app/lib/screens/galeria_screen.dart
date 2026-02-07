@@ -9,7 +9,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as path;
 import 'detalle_foto_screen.dart';
 import "../services/download_service.dart";
-import 'buscar_amigos_screen.dart';
+import 'gestionar_amistades_screen.dart';
 
 class GaleriaScreen extends StatefulWidget {
   final String token;
@@ -598,7 +598,7 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                     if (value == 'config') _mostrarConfiguracionIP();
                     if (value == 'refresh') _cargarDatos();
                     if (value == 'logout') _cerrarSesion();
-                    if (value == 'buscar_amigos')Navigator.push(context, MaterialPageRoute(builder: (context) => const BuscarAmigosScreen()));
+                    if (value == 'gestionar_amistades')Navigator.push(context, MaterialPageRoute(builder: (context) => const GestionarAmistadesScreen()));
                   },
                   itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
                     // Opción 1: Configurar IP
@@ -613,10 +613,10 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                       ),
                     ),
                     const PopupMenuItem<String>( // --- NUEVA OPCIÓN ---
-                      value: 'buscar_amigos',
+                      value: 'gestionar_amistades',
                       child: ListTile(
                         leading: Icon(Icons.person_search),
-                        title: Text('Buscar Amigos'),
+                        title: Text('Gestionar Amistades'),
                       ),
                     ),
                     // Opción 2: Refrescar

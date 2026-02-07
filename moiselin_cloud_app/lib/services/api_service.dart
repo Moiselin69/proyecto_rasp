@@ -268,7 +268,7 @@ class ApiService {
 
   static Future<Map<String, String>> _getHeaders() async {
     const storage = FlutterSecureStorage();
-    final token = await storage.read(key: 'access_token');
+    final token = await storage.read(key: 'token');
     return {
       'Content-Type': 'application/json',
       if (token != null) 'Authorization': 'Bearer $token',
@@ -303,4 +303,66 @@ class ApiService {
       throw Exception('Error al enviar solicitud: ${response.body}');
     }
   }
+
+  static Future<List<dynamic>> verPeticionesPendientes() async {
+    final url = Uri.parse('$baseUrl/amigos/pendientes');
+    final response = await http.get(
+      url,
+      headers: await _getHeaders(),
+    );
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      // Si no hay peticiones o error, devolvemos lista vacía para no romper la UI
+      return []; 
+    }
+  }
+
+  static Future<void> aceptarAmistad(int idPersonaQueEnvio) async {
+    final url = Uri.parse('$baseUrl/amigos/aceptar');
+    final response = await http.post(
+      url,
+      headers: await _getHeaders(),
+      body: jsonEncode({'id_persona_objetivo': idPersonaQueEnvio}),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Error al aceptar: ${response.body}');
+    }
+  }
+
+  static Future<void> rechazarAmistad(int idPersonaQueEnvio) async {
+    final url = Uri.parse('$baseUrl/amigos/rechazar');
+    final response = await http.post(
+      url,
+      headers: await _getHeaders(),
+      body: jsonEncode({'id_persona_objetivo': idPersonaQueEnvio}),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Error al rechazar: ${response.body}');
+    }
+  }
+
+  static Future<List<dynamic>> verAmigos() async {
+    final url = Uri.parse('$baseUrl/amigos/listar');
+    final response = await http.get(url, headers: await _getHeaders());
+    
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      throw Exception('Error al cargar amigos: ${response.body}');
+    }
+  }
+
+  static Future<void> eliminarAmigo(int idAmigo) async {
+    final url = Uri.parse('$baseUrl/amigos/eliminar/$idAmigo');
+    final response = await http.delete(url, headers: await _getHeaders());
+    
+    if (response.statusCode != 200) {
+      throw Exception('Error al eliminar amigo: ${response.body}');
+    }
+  }
+
 }
