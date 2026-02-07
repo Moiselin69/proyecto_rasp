@@ -9,6 +9,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as path;
 import 'detalle_foto_screen.dart';
 import "../services/download_service.dart";
+import 'buscar_amigos_screen.dart';
 
 class GaleriaScreen extends StatefulWidget {
   final String token;
@@ -555,15 +556,15 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
         centerTitle: true,
         backgroundColor: Colors.white,
         elevation: 1, // Un poco de sombra queda bien
-        iconTheme: IconThemeData(color: Colors.black), // Iconos negros por defecto
+        iconTheme: const IconThemeData(color: Colors.black), // Iconos negros por defecto
 
         // --- TÍTULO CON MENÚ DESPLEGABLE ---
         title: _buscando 
           ? TextField(
               controller: _searchController,
               autofocus: true,
-              style: TextStyle(color: Colors.black),
-              decoration: InputDecoration(
+              style: const TextStyle(color: Colors.black),
+              decoration: const InputDecoration(
                 hintText: "Buscar archivo...",
                 border: InputBorder.none,
                 hintStyle: TextStyle(color: Colors.grey),
@@ -584,11 +585,11 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                       Flexible(
                         child: Text(
                           widget.nombreCarpeta, 
-                          style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+                          style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      Icon(Icons.arrow_drop_down, color: Colors.black),
+                      const Icon(Icons.arrow_drop_down, color: Colors.black),
                     ],
                   ),
                   
@@ -597,10 +598,11 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                     if (value == 'config') _mostrarConfiguracionIP();
                     if (value == 'refresh') _cargarDatos();
                     if (value == 'logout') _cerrarSesion();
+                    if (value == 'buscar_amigos')Navigator.push(context, MaterialPageRoute(builder: (context) => const BuscarAmigosScreen()));
                   },
                   itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
                     // Opción 1: Configurar IP
-                    PopupMenuItem<String>(
+                    const PopupMenuItem<String>(
                       value: 'config',
                       child: Row(
                         children: [
@@ -610,8 +612,15 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                         ],
                       ),
                     ),
+                    const PopupMenuItem<String>( // --- NUEVA OPCIÓN ---
+                      value: 'buscar_amigos',
+                      child: ListTile(
+                        leading: Icon(Icons.person_search),
+                        title: Text('Buscar Amigos'),
+                      ),
+                    ),
                     // Opción 2: Refrescar
-                    PopupMenuItem<String>(
+                    const PopupMenuItem<String>(
                       value: 'refresh',
                       child: Row(
                         children: [
@@ -621,9 +630,9 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                         ],
                       ),
                     ),
-                    PopupMenuDivider(), // Una línea separadora queda elegante
+                    const PopupMenuDivider(), // Una línea separadora queda elegante
                     // Opción 3: Cerrar Sesión
-                    PopupMenuItem<String>(
+                    const PopupMenuItem<String>(
                       value: 'logout',
                       child: Row(
                         children: [

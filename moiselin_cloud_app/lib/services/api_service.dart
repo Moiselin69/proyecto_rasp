@@ -265,4 +265,42 @@ class ApiService {
     );
     return response.statusCode == 200;
   }
+
+  static Future<Map<String, String>> _getHeaders() async {
+    const storage = FlutterSecureStorage();
+    final token = await storage.read(key: 'access_token');
+    return {
+      'Content-Type': 'application/json',
+      if (token != null) 'Authorization': 'Bearer $token',
+    };
+  }
+
+  static Future<List<dynamic>> buscarPersonas(String termino) async {
+    final url = Uri.parse('$baseUrl/persona/buscar?termino=$termino');
+    final response = await http.get(
+      url,
+      headers: await _getHeaders(),
+    );
+
+    if (response.statusCode == 200) {
+      // El backend devuelve una lista de objetos JSON
+      return jsonDecode(response.body);
+    } else {
+      throw Exception('Error al buscar personas: ${response.body}');
+    }
+  }
+
+  // Enviar solicitud de amistad
+  static Future<void> solicitarAmistad(int idPersonaObjetivo) async {
+    final url = Uri.parse('$baseUrl/amigos/solicitar');
+    final response = await http.post(
+      url,
+      headers: await _getHeaders(),
+      body: jsonEncode({'id_persona_objetivo': idPersonaObjetivo}),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Error al enviar solicitud: ${response.body}');
+    }
+  }
 }
