@@ -33,9 +33,14 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
   List<Recurso> _todosLosRecursos = []; 
   List<Recurso> _recursosFiltrados = []; 
   List<Album> _albumesVisibles = [];
+  List<Album> _albumesFiltrados = [];
+  bool _buscando = false;
+  final TextEditingController _searchController = TextEditingController();
+  String _filtroOrden = "subida_desc";
   
   // --- NUEVA LÓGICA DE SELECCIÓN MIXTA ---
   bool _modoSeleccion = false;
+  bool _mostrarMenuAdmin = false;
   Set<int> _recursosSeleccionados = {};
   Set<int> _albumesSeleccionados = {}; // Nuevo set para carpetas
   
@@ -57,7 +62,7 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
         setState(() {
           _albumesVisibles = albumes.where((a) => a.idAlbumPadre == widget.parentId).toList();
           _todosLosRecursos = recursos.where((r) => r.idAlbum == widget.parentId).toList();
-          _aplicarFiltro(_filtroSeleccionado);
+          _aplicarFiltros();
           _cargando = false;
         });
       }
@@ -65,6 +70,96 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
       print("Error cargando datos: $e");
       if (mounted) setState(() => _cargando = false);
     }
+  }
+
+  void _aplicarFiltros() {
+    // 1. Empezamos con la lista completa (copia)
+    List<Recurso> listaRecursos = List.from(_todosLosRecursos); // Asegúrate de tener _todosLosRecursos llena con los datos de la API
+    List<Album> listaAlbumes = List.from(_albumesVisibles);
+    // 2. Filtro de Texto (Buscador)
+    String texto = _searchController.text.toLowerCase();
+    if (texto.isNotEmpty) {
+      listaRecursos = listaRecursos.where((r) => 
+        r.nombre.toLowerCase().contains(texto)
+      ).toList();
+      listaAlbumes = listaAlbumes.where((a) => 
+        a.nombre.toLowerCase().contains(texto)
+      ).toList();
+    }
+    int compararAlbumes(Album a, Album b, bool asc) {
+       return asc 
+         ? a.fechaCreacion.compareTo(b.fechaCreacion)
+         : b.fechaCreacion.compareTo(a.fechaCreacion);
+    }
+    // 3. Ordenación
+    switch (_filtroOrden) {
+      case 'subida_desc': // Reciente primero
+        listaRecursos.sort((a, b) => b.fechaSubida.compareTo(a.fechaSubida));
+        listaAlbumes.sort((a, b) => compararAlbumes(a, b, false)); 
+        break;
+        
+      case 'subida_asc': // Antiguo primero
+        listaRecursos.sort((a, b) => a.fechaSubida.compareTo(b.fechaSubida));
+        listaAlbumes.sort((a, b) => compararAlbumes(a, b, true));
+        break;
+      
+      case 'real_desc': 
+        // En carpetas "fecha real" lo tratamos como "creación"
+        listaRecursos.sort((a, b) => (b.fechaReal ?? DateTime(1900)).compareTo(a.fechaReal ?? DateTime(1900)));
+        listaAlbumes.sort((a, b) => compararAlbumes(a, b, false));
+        break;
+      
+      case 'real_asc':
+        listaRecursos.sort((a, b) => (a.fechaReal ?? DateTime(2100)).compareTo(b.fechaReal ?? DateTime(2100)));
+        listaAlbumes.sort((a, b) => compararAlbumes(a, b, true));
+        break;
+
+      case 'nombre_asc':
+        listaRecursos.sort((a, b) => a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase()));
+        listaAlbumes.sort((a, b) => a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase()));
+        break;
+    }
+
+    // 4. Actualizamos la vista
+    setState(() {
+      _recursosFiltrados = listaRecursos;
+      _albumesFiltrados = listaAlbumes;
+    });
+  }
+
+  void _mostrarMenuOrden() {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) {
+        return Container(
+          padding: EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text("Ordenar por", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              Divider(),
+              _buildOpcionOrden("📅 Fecha de Subida (Reciente)", "subida_desc"),
+              _buildOpcionOrden("📅 Fecha de Subida (Antiguo)", "subida_asc"),
+              _buildOpcionOrden("📷 Fecha Captura (Reciente)", "real_desc"),
+              _buildOpcionOrden("🔤 Nombre (A-Z)", "nombre_asc"),
+            ],
+          ),
+        );
+      }
+    );
+  }
+
+  Widget _buildOpcionOrden(String texto, String valor) {
+    bool seleccionado = _filtroOrden == valor;
+    return ListTile(
+      title: Text(texto, style: TextStyle(fontWeight: seleccionado ? FontWeight.bold : FontWeight.normal, color: seleccionado ? Colors.blue : Colors.black)),
+      trailing: seleccionado ? Icon(Icons.check, color: Colors.blue) : null,
+      onTap: () {
+        setState(() => _filtroOrden = valor);
+        _aplicarFiltros(); // Aplicamos el nuevo orden
+        Navigator.pop(context); // Cerramos menú
+      },
+    );
   }
 
   void _mostrarConfiguracionIP() {
@@ -118,79 +213,46 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
   }
 
   void _accionDescargarSeleccion() async {
-    // Si solo has seleccionado carpetas, no hacemos nada
-    if (_recursosSeleccionados.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Selecciona al menos un archivo para descargar"))
-      );
-      return;
-    }
-
-    // Feedback inicial
+    if (_recursosSeleccionados.isEmpty) return;
+    String? directorioDestino = await FilePicker.platform.getDirectoryPath();
+    if (directorioDestino == null) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Descargando ${_recursosSeleccionados.length} archivos..."), duration: Duration(seconds: 1))
+      SnackBar(content: Text("Guardando en: $directorioDestino..."))
     );
-
     int exitoCount = 0;
-    String? ultimaRuta;
-
-    // Recorremos los IDs seleccionados
     for (int id in _recursosSeleccionados) {
       try {
-        // Buscamos el objeto Recurso completo
         final recurso = _todosLosRecursos.firstWhere((r) => r.id == id);
-        
         String urlCompleta = "${ApiService.baseUrl}${recurso.urlVisualizacion}";
-        
-        // --- LÓGICA DE EXTENSIONES (Igual que en detalle) ---
         String nombreFinal = recurso.nombre;
         String extension = "";
-        switch (recurso.tipo) {
-          case "VIDEO": extension = ".mp4"; break;
-          case "IMAGEN": extension = ".jpg"; break;
-          case "AUDIO": extension = ".mp3"; break;
-          case "ARCHIVO": extension = ".pdf"; break; // O la que sea común
+        if (path.extension(nombreFinal).isEmpty) {
+           switch (recurso.tipo) {
+             case "VIDEO": nombreFinal += ".mp4"; break;
+             case "IMAGEN": nombreFinal += ".jpg"; break;
+             case "AUDIO": nombreFinal += ".mp3"; break;
+             case "ARCHIVO": nombreFinal += ".pdf"; break;
+           }
         }
-        if (!nombreFinal.toLowerCase().endsWith(extension)) {
-          nombreFinal += extension;
-        }
-
-        // Descargamos
-        String? resultado = await _downloadService.descargarYGuardar(
+        if (!nombreFinal.toLowerCase().endsWith(extension)) nombreFinal += extension;
+        String? res = await _downloadService.descargarYGuardar(
           urlCompleta, 
           nombreFinal, 
           recurso.tipo, 
-          widget.token
+          widget.token,
+          rutaPersonalizada: directorioDestino
         );
-
-        if (resultado != null) {
-          exitoCount++;
-          ultimaRuta = resultado;
-        }
-
+        if (res != null) exitoCount++;
       } catch (e) {
-        print("Error descargando item $id: $e");
+        print("Error item $id: $e");
       }
     }
-
-    // Mensaje Final
     if (mounted) {
-      _limpiarSeleccion(); // Salimos del modo selección
-      
-      String mensaje = exitoCount > 0 
-          ? "Descargados $exitoCount archivos correctamente." 
-          : "Error en la descarga.";
-          
-      // Si son archivos, damos una pista de dónde están
-      if (exitoCount > 0 && ultimaRuta != null && !ultimaRuta.contains("Galería")) {
-        mensaje += "\nGuardados en Descargas/MoiselinCloud";
-      }
-
+      _limpiarSeleccion();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(mensaje),
-          backgroundColor: exitoCount > 0 ? Colors.green : Colors.red,
-          duration: Duration(seconds: 4),
+          content: Text("Se han guardado $exitoCount archivos en la carpeta elegida."),
+          backgroundColor: Colors.green,
         )
       );
     }
@@ -490,32 +552,129 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        title: _modoSeleccion 
-          ? Text("$totalSeleccionados seleccionados")
-          : Text(widget.nombreCarpeta),
-        leading: _modoSeleccion 
-          ? IconButton(icon: Icon(Icons.close), onPressed: _limpiarSeleccion)
-          : null,
+        centerTitle: true,
+        backgroundColor: Colors.white,
+        elevation: 1, // Un poco de sombra queda bien
+        iconTheme: IconThemeData(color: Colors.black), // Iconos negros por defecto
+
+        // --- TÍTULO CON MENÚ DESPLEGABLE ---
+        title: _buscando 
+          ? TextField(
+              controller: _searchController,
+              autofocus: true,
+              style: TextStyle(color: Colors.black),
+              decoration: InputDecoration(
+                hintText: "Buscar archivo...",
+                border: InputBorder.none,
+                hintStyle: TextStyle(color: Colors.grey),
+              ),
+              onChanged: (val) => _aplicarFiltros(),
+            )
+          : (_modoSeleccion 
+              ? Text("$totalSeleccionados seleccionados", style: TextStyle(color: Colors.black))
+              : PopupMenuButton<String>(
+                  // offset: Mueve el menú un poco abajo para que no tape el título
+                  offset: Offset(0, 45), 
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  
+                  // ESTO ES LO QUE SE VE EN LA BARRA (Texto + Flecha)
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          widget.nombreCarpeta, 
+                          style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      Icon(Icons.arrow_drop_down, color: Colors.black),
+                    ],
+                  ),
+                  
+                  // ESTAS SON LAS OPCIONES QUE CAEN HACIA ABAJO
+                  onSelected: (value) {
+                    if (value == 'config') _mostrarConfiguracionIP();
+                    if (value == 'refresh') _cargarDatos();
+                    if (value == 'logout') _cerrarSesion();
+                  },
+                  itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+                    // Opción 1: Configurar IP
+                    PopupMenuItem<String>(
+                      value: 'config',
+                      child: Row(
+                        children: [
+                          Icon(Icons.settings, color: Colors.blueGrey),
+                          SizedBox(width: 10),
+                          Text('Configurar Servidor'),
+                        ],
+                      ),
+                    ),
+                    // Opción 2: Refrescar
+                    PopupMenuItem<String>(
+                      value: 'refresh',
+                      child: Row(
+                        children: [
+                          Icon(Icons.refresh, color: Colors.blueGrey),
+                          SizedBox(width: 10),
+                          Text('Refrescar Datos'),
+                        ],
+                      ),
+                    ),
+                    PopupMenuDivider(), // Una línea separadora queda elegante
+                    // Opción 3: Cerrar Sesión
+                    PopupMenuItem<String>(
+                      value: 'logout',
+                      child: Row(
+                        children: [
+                          Icon(Icons.logout, color: Colors.redAccent),
+                          SizedBox(width: 10),
+                          Text('Cerrar Sesión', style: TextStyle(color: Colors.redAccent)),
+                        ],
+                      ),
+                    ),
+                  ],
+                )
+            ),
+        
+        // --- BOTÓN IZQUIERDO (Back / Cancelar / Cerrar selección) ---
+        leading: _buscando 
+          ? IconButton(
+              icon: Icon(Icons.arrow_back), 
+              onPressed: () {
+                setState(() {
+                  _buscando = false;
+                  _searchController.clear();
+                  _aplicarFiltros();
+                });
+              }
+            )
+          : (_modoSeleccion 
+              ? IconButton(icon: Icon(Icons.close), onPressed: _limpiarSeleccion)
+              : (widget.parentId != null ? BackButton() : null)
+            ),
+
+        // --- ACCIONES DERECHA (Solo búsqueda y orden) ---
         actions: _modoSeleccion 
           ? [
-              if (_recursosSeleccionados.isNotEmpty) // Solo mostramos si hay archivos (no carpetas)
-                IconButton(
-                  icon: Icon(Icons.download), 
-                  onPressed: _accionDescargarSeleccion
-                ),
+              if (_recursosSeleccionados.isNotEmpty)
+                IconButton(icon: Icon(Icons.download), onPressed: _accionDescargarSeleccion),
               IconButton(icon: Icon(Icons.drive_file_move), onPressed: _accionMover),
-              IconButton(
-                icon: Icon(Icons.share), 
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Compartir: Próximamente")));
-                }
-              ),
               IconButton(icon: Icon(Icons.delete), onPressed: _accionBorrar),
             ]
           : [
-              IconButton(icon: Icon(Icons.settings), onPressed: _mostrarConfiguracionIP, tooltip: "Configurar IP",),
-              IconButton(icon: Icon(Icons.refresh), onPressed: _cargarDatos),
-              IconButton(icon: Icon(Icons.exit_to_app), onPressed: _cerrarSesion),
+              // Si no estamos buscando, mostramos la lupa y el orden
+              if (!_buscando) ...[
+                IconButton(
+                  icon: Icon(Icons.search), 
+                  onPressed: () => setState(() => _buscando = true)
+                ),
+                IconButton(
+                  icon: Icon(Icons.sort), 
+                  onPressed: _mostrarMenuOrden
+                ),
+                // Aquí ya NO ponemos los botones de config/logout porque están en el título
+              ]
             ],
       ),
       body: Column(
@@ -567,10 +726,10 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                       ),
                       itemCount: _albumesVisibles.length + _recursosFiltrados.length,
                       itemBuilder: (context, index) {
-                        if (index < _albumesVisibles.length) {
-                          return _buildCarpeta(_albumesVisibles[index]);
+                        if (index < _albumesFiltrados.length) {
+                          return _buildCarpeta(_albumesFiltrados[index]);
                         } else {
-                          final recurso = _recursosFiltrados[index - _albumesVisibles.length];
+                          final recurso = _recursosFiltrados[index - _albumesFiltrados.length];
                           final isSelected = _recursosSeleccionados.contains(recurso.id);
                           final urlImagen = "${ApiService.baseUrl}${recurso.urlThumbnail}";
                           return GestureDetector(

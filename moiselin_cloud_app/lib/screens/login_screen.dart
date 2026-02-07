@@ -51,9 +51,66 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  void _mostrarConfiguracionIP() {
+  // Controlador con la URL actual para que el usuario la vea
+  final ipController = TextEditingController(text: ApiService.baseUrl);
+
+  showDialog(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text("Configurar Servidor"),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text("Introduce la IP o Dominio de tu servidor (con puerto):"),
+          SizedBox(height: 10),
+          TextField(
+            controller: ipController,
+            decoration: InputDecoration(
+              labelText: "URL Base",
+              hintText: "http://192.168.1.X:8000",
+              border: OutlineInputBorder(),
+            ),
+            keyboardType: TextInputType.url,
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx),
+          child: Text("Cancelar"),
+        ),
+        ElevatedButton(
+          onPressed: () async {
+            if (ipController.text.isNotEmpty) {
+              await ApiService.guardarUrl(ipController.text);
+              Navigator.pop(ctx);
+              
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text("Dirección actualizada a: ${ApiService.baseUrl}"))
+              );
+            }
+          },
+          child: Text("Guardar"),
+        ),
+      ],
+    ),
+  );
+}
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        title: Text("Moiselin Cloud"),
+        actions: [
+          // --- BOTÓN DE CONFIGURACIÓN ---
+          IconButton(
+            icon: Icon(Icons.settings),
+            onPressed: _mostrarConfiguracionIP,
+          ),
+        ],
+      ),
       backgroundColor: Colors.white,
       body: SafeArea(
         child: Center(

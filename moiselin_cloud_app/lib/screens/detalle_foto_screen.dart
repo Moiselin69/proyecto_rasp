@@ -8,6 +8,8 @@ import 'package:intl/intl.dart';
 import '../models/recursos.dart';
 import '../services/api_service.dart';
 import '../services/download_service.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:path/path.dart' as path;
 
 class DetalleRecursoScreen extends StatefulWidget {
   final Recurso recurso;
@@ -56,51 +58,33 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
     }
   }
 
-  void _descargarArchivo() async {
-
-    // URL base
+  void _descargarArchivo() async { 
+    String? directorioDestino = await FilePicker.platform.getDirectoryPath();
+    if (directorioDestino == null) return; // Cancelado
     String urlCompleta = "${ApiService.baseUrl}${widget.recurso.urlVisualizacion}";
-    
-    // Nombre con extensión correcta
     String nombreFinal = widget.recurso.nombre;
-    String extension = "";
-    switch (widget.recurso.tipo) {
-      case "VIDEO": extension = ".mp4"; break;
-      case "IMAGEN": extension = ".jpg"; break;
-      case "AUDIO": extension = ".mp3"; break;
-      case "ARCHIVO": extension = ".pdf"; break; // O .txt según veas
+    if (path.extension(nombreFinal).isEmpty) {
+        switch (widget.recurso.tipo) {
+          case "VIDEO": nombreFinal += ".mp4"; break;
+          case "IMAGEN": nombreFinal += ".jpg"; break;
+          case "AUDIO": nombreFinal += ".mp3"; break;
+          case "ARCHIVO": nombreFinal += ".pdf"; break;
+        }
     }
-    if (!nombreFinal.toLowerCase().endsWith(extension)) {
-      nombreFinal += extension;
-    }
-
-    // Llamamos al servicio (ahora devuelve String?)
-    String? rutaGuardado = await _downloadService.descargarYGuardar(
+    String? resultado = await _downloadService.descargarYGuardar(
       urlCompleta, 
       nombreFinal, 
       widget.recurso.tipo, 
-      widget.token
+      widget.token,
+      rutaPersonalizada: directorioDestino
     );
-
-    if (mounted) {
-      if (rutaGuardado != null) {
-        // ÉXITO: Mostramos la ruta real
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Guardado en:\n$rutaGuardado"),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 5), // Más tiempo para leer
-          )
-        );
-      } else {
-        // ERROR
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Error al descargar. Revisa permisos."),
-            backgroundColor: Colors.red,
-          )
-        );
-      }
+    if (mounted && resultado != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Guardado correctamente en la carpeta seleccionada."), 
+          backgroundColor: Colors.green
+        )
+      );
     }
   }
 
