@@ -60,22 +60,24 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
   void _descargarArchivo() async {
     setState(() => _descargando = true);
 
-    // Construir la URL completa
+    // URL base
     String urlCompleta = "${ApiService.baseUrl}${widget.recurso.urlVisualizacion}";
     
-    // Nombre del archivo (puedes usar el nombre del recurso + extensión)
-    // Truco: Añadir extensión si el nombre no la tiene para que Android lo reconozca
+    // Nombre con extensión correcta
     String nombreFinal = widget.recurso.nombre;
-    if (!nombreFinal.contains(".")) {
+    String extension = "";
     switch (widget.recurso.tipo) {
-      case "VIDEO": nombreFinal += ".mp4"; break;
-      case "IMAGEN": nombreFinal += ".jpg"; break;
-      case "AUDIO": nombreFinal += ".mp3"; break; // <--- Importante para música
-      case "ARCHIVO": nombreFinal += ".pdf"; break; // Asumimos PDF por defecto o déjalo sin nada
+      case "VIDEO": extension = ".mp4"; break;
+      case "IMAGEN": extension = ".jpg"; break;
+      case "AUDIO": extension = ".mp3"; break;
+      case "ARCHIVO": extension = ".pdf"; break; // O .txt según veas
     }
-  }
+    if (!nombreFinal.toLowerCase().endsWith(extension)) {
+      nombreFinal += extension;
+    }
 
-    bool exito = await _downloadService.descargarYGuardar(
+    // Llamamos al servicio (ahora devuelve String?)
+    String? rutaGuardado = await _downloadService.descargarYGuardar(
       urlCompleta, 
       nombreFinal, 
       widget.recurso.tipo, 
@@ -85,12 +87,24 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
     setState(() => _descargando = false);
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(exito ? "Guardado en la galería" : "Error al descargar"),
-          backgroundColor: exito ? Colors.green : Colors.red,
-        )
-      );
+      if (rutaGuardado != null) {
+        // ÉXITO: Mostramos la ruta real
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Guardado en:\n$rutaGuardado"),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 5), // Más tiempo para leer
+          )
+        );
+      } else {
+        // ERROR
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Error al descargar. Revisa permisos."),
+            backgroundColor: Colors.red,
+          )
+        );
+      }
     }
   }
 

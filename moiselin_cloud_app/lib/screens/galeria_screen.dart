@@ -68,51 +68,79 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
   }
 
   void _accionDescargarSeleccion() async {
-    if (_recursosSeleccionados.isEmpty) return;
+    // Si solo has seleccionado carpetas, no hacemos nada
+    if (_recursosSeleccionados.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Selecciona al menos un archivo para descargar"))
+      );
+      return;
+    }
 
-    // Mostrar aviso de inicio
+    // Feedback inicial
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Iniciando descarga de ${_recursosSeleccionados.length} archivos..."))
+      SnackBar(content: Text("Descargando ${_recursosSeleccionados.length} archivos..."), duration: Duration(seconds: 1))
     );
 
     int exitoCount = 0;
-    
+    String? ultimaRuta;
+
     // Recorremos los IDs seleccionados
     for (int id in _recursosSeleccionados) {
       try {
-        // Buscamos el objeto Recurso completo en la lista que ya tenemos cargada
-        // Usamos firstWhere con orElse por seguridad
-        final recurso = _todosLosRecursos.firstWhere((r) => r.id == id, orElse: () => throw Exception("No encontrado"));
+        // Buscamos el objeto Recurso completo
+        final recurso = _todosLosRecursos.firstWhere((r) => r.id == id);
         
-        // Construimos la URL igual que en detalle
         String urlCompleta = "${ApiService.baseUrl}${recurso.urlVisualizacion}";
-        // Preparamos el nombre con extensión
+        
+        // --- LÓGICA DE EXTENSIONES (Igual que en detalle) ---
         String nombreFinal = recurso.nombre;
-        if (!nombreFinal.contains(".")) {
-          switch (recurso.tipo) {
-            case "VIDEO": nombreFinal += ".mp4"; break;
-            case "IMAGEN": nombreFinal += ".jpg"; break;
-            case "AUDIO": nombreFinal += ".mp3"; break;
-            case "ARCHIVO": nombreFinal += ".pdf"; break;
-          }
+        String extension = "";
+        switch (recurso.tipo) {
+          case "VIDEO": extension = ".mp4"; break;
+          case "IMAGEN": extension = ".jpg"; break;
+          case "AUDIO": extension = ".mp3"; break;
+          case "ARCHIVO": extension = ".pdf"; break; // O la que sea común
+        }
+        if (!nombreFinal.toLowerCase().endsWith(extension)) {
+          nombreFinal += extension;
         }
 
-        // Llamamos al servicio (esperamos a que termine uno para empezar el otro y no saturar)
-        bool ok = await _downloadService.descargarYGuardar(urlCompleta, nombreFinal, recurso.tipo, widget.token);
-        if (ok) exitoCount++;
+        // Descargamos
+        String? resultado = await _downloadService.descargarYGuardar(
+          urlCompleta, 
+          nombreFinal, 
+          recurso.tipo, 
+          widget.token
+        );
+
+        if (resultado != null) {
+          exitoCount++;
+          ultimaRuta = resultado;
+        }
 
       } catch (e) {
-        print("Error al descargar recurso $id: $e");
+        print("Error descargando item $id: $e");
       }
     }
 
-    // Resultado final
+    // Mensaje Final
     if (mounted) {
-      _limpiarSeleccion(); // Salimos del modo selección al terminar
+      _limpiarSeleccion(); // Salimos del modo selección
+      
+      String mensaje = exitoCount > 0 
+          ? "Descargados $exitoCount archivos correctamente." 
+          : "Error en la descarga.";
+          
+      // Si son archivos, damos una pista de dónde están
+      if (exitoCount > 0 && ultimaRuta != null && !ultimaRuta.contains("Galería")) {
+        mensaje += "\nGuardados en Descargas/MoiselinCloud";
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text("Descarga finalizada: $exitoCount guardados correctamente"),
-          backgroundColor: exitoCount > 0 ? Colors.green : Colors.orange,
+          content: Text(mensaje),
+          backgroundColor: exitoCount > 0 ? Colors.green : Colors.red,
+          duration: Duration(seconds: 4),
         )
       );
     }

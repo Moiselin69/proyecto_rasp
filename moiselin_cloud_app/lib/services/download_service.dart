@@ -7,94 +7,90 @@ import 'package:permission_handler/permission_handler.dart';
 
 class DownloadService {
   
-  Future<bool> descargarYGuardar(String url, String nombreArchivo, String tipo, String token) async {
-  try {
-    // 1. GESTIÓN DE PERMISOS POTENTE
-    if (Platform.isAndroid) {
-      // Intentamos pedir el permiso de "Gestionar almacenamiento" (Android 11+)
-      var status = await Permission.manageExternalStorage.status;
-      if (!status.isGranted) {
-        await Permission.manageExternalStorage.request();
+  // Ahora devuelve un String? (null si falla, texto de la ruta si funciona)
+  Future<String?> descargarYGuardar(String url, String nombreArchivo, String tipo, String token) async {
+    try {
+      // 1. GESTIÓN DE PERMISOS (Android 11+)
+      if (Platform.isAndroid) {
+        if (!await Permission.manageExternalStorage.request().isGranted && 
+            !await Permission.storage.request().isGranted) {
+           await openAppSettings(); 
+           return null; // Sin permisos no hacemos nada
+        }
       }
-      
-      // Por si acaso es un Android antiguo (menor a 11), pedimos el normal
-      if (!await Permission.manageExternalStorage.isGranted) {
-        await Permission.storage.request();
-      }
-    }
 
+      // 2. Preparar descarga
       final tempDir = await getTemporaryDirectory();
       final tempPath = "${tempDir.path}/$nombreArchivo";
+      print("Descargando: $url");
 
-      print("Iniciando descarga de: $url");
-
-      // --- CONFIGURACIÓN ESPECIAL PARA HTTPS ---
+      // 3. Configurar Dio para HTTPS (Certificados autofirmados)
       final dio = Dio();
-      // Esto permite descargar de HTTPS con certificados autofirmados (tu servidor local)
       (dio.httpClientAdapter as IOHttpClientAdapter).createHttpClient = () {
         final client = HttpClient();
-        client.badCertificateCallback = (X509Certificate cert, String host, int port) => true;
+        client.badCertificateCallback = (cert, host, port) => true;
         return client;
       };
-      // ----------------------------------------
 
+      // 4. Descargar
       await dio.download(
         url,
         tempPath,
         options: Options(headers: {"Authorization": "Bearer $token"}),
       );
 
-      // 4. Mover el archivo a su destino final según el tipo
-      bool exito = false;
+      // 5. Guardar y devolver la RUTA
+      String? resultado;
+
       if (tipo == "VIDEO") {
-        exito = (await GallerySaver.saveVideo(tempPath, albumName: "Moiselin Cloud")) ?? false;
+        bool ok = (await GallerySaver.saveVideo(tempPath, albumName: "Moiselin Cloud")) ?? false;
+        if (ok) resultado = "Galería > Álbum 'Moiselin Cloud'";
       } 
       else if (tipo == "IMAGEN") {
-        exito = (await GallerySaver.saveImage(tempPath, albumName: "Moiselin Cloud")) ?? false;
+        bool ok = (await GallerySaver.saveImage(tempPath, albumName: "Moiselin Cloud")) ?? false;
+        if (ok) resultado = "Galería > Álbum 'Moiselin Cloud'";
       } 
       else {
-        exito = await _guardarEnDescargas(tempPath, nombreArchivo);
+        // Para archivos, devolvemos la ruta explícita
+        String ruta = await _guardarEnDescargas(tempPath, nombreArchivo);
+        if (ruta.isNotEmpty) resultado = ruta;
       }
 
+      // Limpieza
       final fileTemp = File(tempPath);
       if (await fileTemp.exists()) await fileTemp.delete();
 
-      return exito;
+      return resultado;
 
     } catch (e) {
       print("Error en descarga: $e");
-      return false;
+      return null;
     }
   }
 
-  // Función auxiliar para mover archivos a la carpeta pública
-  Future<bool> _guardarEnDescargas(String rutaOrigen, String nombreArchivo) async {
+  // Devuelve la ruta final como String
+  Future<String> _guardarEnDescargas(String rutaOrigen, String nombreArchivo) async {
     try {
       Directory? carpetaDestino;
-
       if (Platform.isAndroid) {
-        // En Android, guardamos en /storage/emulated/0/Download/MoiselinCloud
+        // Ruta pública de descargas
         carpetaDestino = Directory('/storage/emulated/0/Download/MoiselinCloud');
       } else {
-        // En iOS, guardamos en la carpeta de Documentos de la App
         carpetaDestino = await getApplicationDocumentsDirectory();
       }
-
-      // Crear carpeta si no existe
+      
       if (!await carpetaDestino.exists()) {
         await carpetaDestino.create(recursive: true);
       }
 
       final rutaFinal = "${carpetaDestino.path}/$nombreArchivo";
-      
-      // Copiar el archivo
       await File(rutaOrigen).copy(rutaFinal);
-      print("Archivo guardado en: $rutaFinal");
-      return true;
+      
+      return rutaFinal; // Devolvemos la ruta para mostrarla
 
     } catch (e) {
-      print("Error guardando archivo genérico: $e");
-      return false;
+      print("Error moviendo archivo: $e");
+      return "";
     }
   }
 }
