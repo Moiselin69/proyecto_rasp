@@ -724,7 +724,7 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                         mainAxisSpacing: 8,
                         childAspectRatio: 0.8,
                       ),
-                      itemCount: _albumesVisibles.length + _recursosFiltrados.length,
+                      itemCount: _albumesFiltrados.length + _recursosFiltrados.length,
                       itemBuilder: (context, index) {
                         if (index < _albumesFiltrados.length) {
                           return _buildCarpeta(_albumesFiltrados[index]);
