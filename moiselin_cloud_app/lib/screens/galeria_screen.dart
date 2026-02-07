@@ -11,6 +11,7 @@ import 'detalle_foto_screen.dart';
 import "../services/download_service.dart";
 import 'gestionar_amistades_screen.dart';
 import 'configuracion_screen.dart';
+import 'compartidos_screen.dart';
 
 class GaleriaScreen extends StatefulWidget {
   final String token;
@@ -561,7 +562,8 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                     if (value == 'config') Navigator.push(context,MaterialPageRoute(builder: (context) => const ConfiguracionScreen()),).then((_) {_cargarDatos(); });
                     if (value == 'refresh') _cargarDatos();
                     if (value == 'logout') _cerrarSesion();
-                    if (value == 'gestionar_amistades')Navigator.push(context, MaterialPageRoute(builder: (context) => const GestionarAmistadesScreen()));
+                    if (value == 'gestionar_amistades') Navigator.push(context, MaterialPageRoute(builder: (context) => const GestionarAmistadesScreen()));
+                    if (value == 'compartidos') Navigator.push(context,MaterialPageRoute(builder: (context) => const CompartidosScreen()),);
                   },
                   itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
                     // Opción 1: Configurar IP
@@ -575,14 +577,20 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                         ],
                       ),
                     ),
-                    const PopupMenuItem<String>( // --- NUEVA OPCIÓN ---
+                    const PopupMenuItem<String>(
                       value: 'gestionar_amistades',
                       child: ListTile(
                         leading: Icon(Icons.person_search),
                         title: Text('Gestionar Amistades'),
                       ),
                     ),
-                    // Opción 2: Refrescar
+                    const PopupMenuItem<String>(
+                      value: 'compartidos',
+                      child: ListTile(
+                        leading: Icon(Icons.folder_shared),
+                        title: Text('Compartidos conmigo'),
+                      ),
+                    ),
                     const PopupMenuItem<String>(
                       value: 'refresh',
                       child: Row(

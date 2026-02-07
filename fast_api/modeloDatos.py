@@ -53,3 +53,8 @@ class AlbumMover(BaseModel):
 class CompartirRecurso(BaseModel):
     id_recurso: int
     id_amigo_receptor: int
+
+class RespuestaPeticionRecurso(BaseModel):
+    id_emisor: int
+    id_recurso: int
+    aceptar: bool

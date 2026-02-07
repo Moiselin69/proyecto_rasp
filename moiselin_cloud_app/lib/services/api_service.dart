@@ -73,7 +73,10 @@ class ApiService {
   }
 
   // Función para obtener el token guardado (útil para la Galería)
-  Future<String?> getToken() async {
+  static Future<String?> getToken() async {
+    const storage = FlutterSecureStorage();
+    String? token = await storage.read(key: 'token');
+    if (token != null) return token;
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString('auth_token');
   }
@@ -397,6 +400,53 @@ class ApiService {
       // Manejo de errores mejorado
       String mensajeError = body['detail'] ?? body['message'] ?? 'Error desconocido';
       throw Exception(mensajeError);
+    }
+  }
+
+  static Future<List<Recurso>> verCompartidosConmigo() async {
+    final url = Uri.parse('$baseUrl/recurso/compartidos-conmigo');
+    final response = await http.get(url, headers: await _getHeaders());
+
+    if (response.statusCode == 200) {
+      List<dynamic> data = jsonDecode(response.body);
+      try {
+        return data.map((json) => Recurso.fromJson(json)).toList();
+      } catch (e) {
+        print("Error al convertir JSON a Recurso: $e");
+        // Si falla la conversión de uno, falla toda la lista.
+        // Verificamos si algún campo viene nulo y el modelo no lo acepta.
+        return [];
+      }
+    } else {
+      throw Exception('Error al cargar compartidos: ${response.body}');
+    }
+  }
+
+  // Ver solicitudes pendientes
+  static Future<List<dynamic>> verSolicitudesRecursos() async {
+    final url = Uri.parse('$baseUrl/recurso/peticiones-recepcion');
+    final response = await http.get(url, headers: await _getHeaders());
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      return [];
+    }
+  }
+
+  // Responder solicitud
+  static Future<void> responderSolicitudRecurso(int idEmisor, int idRecurso, bool aceptar) async {
+    final url = Uri.parse('$baseUrl/recurso/peticiones-recepcion/responder');
+    final response = await http.post(
+      url,
+      headers: await _getHeaders(),
+      body: jsonEncode({
+        'id_emisor': idEmisor,
+        'id_recurso': idRecurso,
+        'aceptar': aceptar
+      }),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Error al responder: ${response.body}');
     }
   }
 

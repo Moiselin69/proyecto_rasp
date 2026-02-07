@@ -120,32 +120,29 @@ def ver_archivo_recurso(id_recurso: int, size:str = "full",current_user_id: int 
         raise HTTPException(status_code=404, detail="El archivo físico se ha perdido")
     return FileResponse(ruta_original)
 
+#~Endpoint para ver los recursos compartidos conmigo
+@router.get("/recurso/compartidos-conmigo")
+def ver_compartidos(current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+    exito, resultado = consultasRecursos.obtener_compartidos_conmigo(current_user_id)
+    if not exito:
+        raise HTTPException(status_code=400, detail=str(resultado))
+    return resultado
+
 #~Endpoint para ver quién te quiere compartir archivos
-@router.get("/recurso/peticiones")
-def ver_peticiones_recursos(current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
-    # Usamos la función que YA EXISTÍA en tu archivo consultasRecursos.py
-    exito, res = consultasRecursos.ver_peticiones_recurso_pendientes(current_user_id)
+@router.get("/recurso/peticiones-recepcion")
+def ver_peticiones_recepcion(current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+    exito, resultado = consultasRecursos.obtener_peticiones_recurso_pendientes(current_user_id)
     if not exito:
-        raise HTTPException(status_code=400, detail=str(res))
-    return res
+        raise HTTPException(status_code=400, detail=str(resultado))
+    return resultado
 
-#~Endpoint para aceptar un archivo compartido
-@router.post("/recurso/peticion/aceptar")
-def aceptar_recurso_compartido(datos: modeloDatos.RespuestaPeticionRecurso, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
-    # id_persona_emisora: quien envió la solicitud (el dueño original)
-    # current_user_id: quien la acepta (tú)
-    exito, res = consultasRecursos.aceptar_compartir_recurso(datos.id_persona_emisora, current_user_id, datos.id_recurso)
+#~Endpoint para responder a una petiicon de compartir recurso
+@router.post("/recurso/peticiones-recepcion/responder")
+def responder_solicitud_recurso(datos: modeloDatos.RespuestaPeticionRecurso, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+    exito, mensaje = consultasRecursos.responder_peticion_recurso(datos.id_emisor, current_user_id, datos.id_recurso, datos.aceptar)
     if not exito:
-        raise HTTPException(status_code=400, detail=str(res))
-    return {"mensaje": "Recurso aceptado. Ahora aparecerá en 'Mis Recursos'", "id_recurso": res}
-
-#~Endpoint para rechazar un archivo compartido
-@router.post("/recurso/peticion/rechazar")
-def rechazar_recurso_compartido(datos: modeloDatos.RespuestaPeticionRecurso, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
-    exito, res = consultasRecursos.rechazar_peticion_recurso(datos.id_persona_emisora, current_user_id, datos.id_recurso)
-    if not exito:
-        raise HTTPException(status_code=400, detail=str(res))
-    return {"mensaje": res}
+        raise HTTPException(status_code=400, detail=mensaje)
+    return {"mensaje": mensaje}
 
 #~Endpoint para editar el nombre de un recursos
 @router.put("/recurso/editar/nombre/{id_recurso}")

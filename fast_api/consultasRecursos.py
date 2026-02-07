@@ -145,10 +145,10 @@ def cambiar_fecha_recurso(id_recurso:int, fecha:datetime, id_persona:int):
             connection.close()
 
 def compartir_recurso_bd(id_recurso, id_emisor, id_receptor):
-    conexion = db.conectar_bd()
+    conexion = db.get_connection()
     try:
         with conexion.cursor() as cursor:
-            sql_owner = "SELECT id FROM Recurso WHERE id = %s AND id_persona = %s"
+            sql_owner = "SELECT id FROM Recurso WHERE id = %s AND id_creador = %s"
             cursor.execute(sql_owner, (id_recurso, id_emisor))
             if not cursor.fetchone():
                 return False, "Error: No puedes compartir un recurso que no es tuyo."
@@ -188,73 +188,50 @@ def compartir_recurso_bd(id_recurso, id_emisor, id_receptor):
     finally:
         conexion.close()    
 
-def aceptar_compartir_recurso(id_persona: int, id_persona_compartida: int, id_recurso: int):
-    connection = None
+def obtener_peticiones_recurso_pendientes(id_receptor):
+    conexion = db.get_connection()
     try:
-        connection = db.get_connection()
-        connection.autocommit = False
-        if connection.is_connected():
-            cursor = connection.cursor()
-            query_1 = "DELETE FROM Peticion_Recurso where id_persona=%s and id_persona_compartida=%s and id_recurso=%s"
-            query_2 = "INSERT INTO Recurso_Persona (id_recurso, id_persona) VALUES(%s,%s)"
-            valores_1 = (id_persona, id_persona_compartida, id_recurso)
-            valores_2 = (id_recurso, id_persona_compartida)
-            cursor.execute(query_1, valores_1)
-            if cursor.rowcount == 0:
-                connection.rollback()
-                return (False, "No existe ninguna petición de amistad para este recurso o ya fue aceptada.")
-            cursor.execute(query_2, valores_2)
-            connection.commit()
-            return (True, id_recurso)
-    except Error as e:
-        if connection and connection.is_connected():
-            connection.rollback()
-        print(f"Error en pedir compartir recurso en MySql: {e}")
-        return (False, str(e))
-    finally: 
-        if connection is not None and connection.is_connected():
-            if 'cursor' in locals(): cursor.close()
-            connection.close()
-
-def ver_peticiones_recurso_pendientes(id_persona_compartida: int):
-    # Muestra quien te quiere mandar qué cosa
-    connection = None
-    cursor = None
-    try:
-        connection = db.get_connection()
-        cursor = connection.cursor(dictionary=True)
-        query = """
-            SELECT P.nombre as remitente, R.nombre as recurso, R.tipo, PR.id_recurso, PR.id_persona as id_remitente
-            FROM Peticion_Recurso PR
-            JOIN Persona P ON PR.id_persona = P.id
-            JOIN Recurso R ON PR.id_recurso = R.id
-            WHERE PR.id_persona_compartida = %s
-        """
-        cursor.execute(query, (id_persona_compartida,))
-        return (True, cursor.fetchall())
-    except Error as e:
-        return (False, str(e))
+        with conexion.cursor(dictionary=True) as cursor:
+            # PR.id_persona es el Emisor, PR.id_persona_compartida es el Receptor (Tú)
+            sql = """
+                SELECT R.nombre as nombre_recurso, R.tipo, P.nombre as nombre_emisor, P.apellidos as apellidos_emisor, 
+                       PR.id_recurso, PR.id_persona as id_emisor, PR.fecha_solicitud
+                FROM Peticion_Recurso PR
+                JOIN Recurso R ON PR.id_recurso = R.id
+                JOIN Persona P ON PR.id_persona = P.id
+                WHERE PR.id_persona_compartida = %s AND PR.estado = 'PENDIENTE'
+            """
+            cursor.execute(sql, (id_receptor,))
+            return True, cursor.fetchall()
+    except Exception as e:
+        return False, str(e)
     finally:
-        if cursor: cursor.close()
-        if connection: connection.close()
+        if conexion: conexion.close()
 
-def rechazar_peticion_recurso(id_persona: int, id_persona_compartida: int, id_recurso: int):
-    connection = None
-    cursor = None
+def responder_peticion_recurso(id_emisor, id_receptor, id_recurso, aceptar):
+    """Acepta o rechaza una solicitud de recurso."""
+    conexion = db.get_connection()
     try:
-        connection = db.get_connection()
-        cursor = connection.cursor()
-        query = "DELETE FROM Peticion_Recurso WHERE id_persona=%s AND id_persona_compartida=%s AND id_recurso=%s"
-        cursor.execute(query, (id_persona, id_persona_compartida, id_recurso))
-        connection.commit()
-        if cursor.rowcount == 0:
-            return (False, "No se encontró la petición")
-        return (True, "Petición rechazada")
-    except Error as e:
-        return (False, str(e))
+        with conexion.cursor() as cursor:
+            nuevo_estado = 'ACEPTADA' if aceptar else 'RECHAZADA'
+            sql_update = """
+                UPDATE Peticion_Recurso 
+                SET estado = %s 
+                WHERE id_persona = %s AND id_persona_compartida = %s AND id_recurso = %s
+            """
+            cursor.execute(sql_update, (nuevo_estado, id_emisor, id_receptor, id_recurso))
+            if aceptar:
+                sql_insert = """
+                    INSERT IGNORE INTO Recurso_Compartido (id_recurso, id_emisor, id_receptor) 
+                    VALUES (%s, %s, %s)
+                """
+                cursor.execute(sql_insert, (id_recurso, id_emisor, id_receptor))
+            conexion.commit()
+            return True, f"Solicitud {nuevo_estado.lower()} correctamente."
+    except Exception as e:
+        return False, str(e)
     finally:
-        if cursor: cursor.close()
-        if connection: connection.close()
+        if conexion: conexion.close()
 
 def obtener_recurso_por_id(id_recurso: int, id_persona: int):
     connection = None
@@ -354,3 +331,23 @@ def revocar_todos_accesos_recurso(id_recurso: int, id_persona: int):
     finally:
         if cursor: cursor.close()
         if connection and connection.is_connected(): connection.close()
+
+def obtener_compartidos_conmigo(id_receptor):
+    """Devuelve los recursos que otros han compartido contigo."""
+    conexion = db.get_connection()
+    try:
+        with conexion.cursor(dictionary=True) as cursor:
+            sql = """
+                SELECT R.*, P.nombre as nombre_emisor, P.apellidos as apellidos_emisor, RC.fecha_compartido
+                FROM Recurso R
+                JOIN Recurso_Compartido RC ON R.id = RC.id_recurso
+                JOIN Persona P ON RC.id_emisor = P.id
+                WHERE RC.id_receptor = %s
+                ORDER BY RC.fecha_compartido DESC
+            """
+            cursor.execute(sql, (id_receptor,))
+            return True, cursor.fetchall()
+    except Exception as e:
+        return False, str(e)
+    finally:
+        if conexion: conexion.close()

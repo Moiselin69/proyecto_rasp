@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import uvicorn
+import os
 import endpointsPersona
 import endpointsAlbum
 import endpointsRecursos
@@ -9,6 +11,10 @@ app = FastAPI(
     description="API para gestión de archivos y álbumes tipo nube privada",
     version="1.0.0"
 )
+if not os.path.exists("static"):
+    os.makedirs("static")
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
 origins = ["*"]
 app.add_middleware(
     CORSMiddleware,
