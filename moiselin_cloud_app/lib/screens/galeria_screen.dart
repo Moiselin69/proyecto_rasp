@@ -13,6 +13,7 @@ import 'gestionar_amistades_screen.dart';
 import 'configuracion_screen.dart';
 import 'compartidos_screen.dart';
 import 'papelera_screen.dart';
+import 'admin_screen.dart';
 
 class GaleriaScreen extends StatefulWidget {
   final String token;
@@ -33,6 +34,7 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
   final ApiService _apiService = ApiService();
   final DownloadService _downloadService = DownloadService();
   bool _cargando = true;
+  bool _esAdmin = false;
   String _filtroSeleccionado = "Todos"; 
   List<Recurso> _todosLosRecursos = []; 
   List<Recurso> _recursosFiltrados = []; 
@@ -53,6 +55,7 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
   void initState() {
     super.initState();
     _cargarDatos();
+    _checkAdmin();
   }
 
   void _cargarDatos() async {
@@ -72,6 +75,15 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
     } catch (e) {
       print("Error cargando datos: $e");
       if (mounted) setState(() => _cargando = false);
+    }
+  }
+
+  void _checkAdmin() async {
+    bool admin = await _apiService.soyAdmin(widget.token);
+    if (mounted) {
+      setState(() {
+        _esAdmin = admin;
+      });
     }
   }
 
@@ -384,27 +396,23 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
         reemplazar = true;
       }
       setState(() => _cargando = true);
-      bool exito = await _apiService.subirRecurso(widget.token, file, tipo, idAlbum: widget.parentId,reemplazar: reemplazar);
-      if (exito) {
+      String? resultado = await _apiService.subirPorChunks(widget.token, file, tipo, idAlbum: widget.parentId,reemplazar: reemplazar);
+      if (resultado != null && !resultado.contains("Error") && resultado != "DUPLICADO") {
+        // ÉXITO
         bool borrar = await ApiService.getBorrarAlSubir();
-        if (borrar) {
-          try {
-            if (await file.exists()) await file.delete();
-          } catch (e) {
-            print("No se pudo borrar local: $e");
-          }
-        }
-        if (mounted) {
-          String mensaje = reemplazar 
-              ? "Archivo remplazado" 
-              : "Archivo subido correctamente";
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(mensaje)));
-        }
-        _cargarDatos(); // Refrescamos la galería
-      } else {
+        if (borrar) { try { if (await file.exists()) await file.delete(); } catch (e) {} }
+        
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Error al subir el archivo"))
+            SnackBar(content: Text(resultado), backgroundColor: Colors.green)
+          );
+        }
+        _cargarDatos();
+      } else {
+        // ERROR
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(resultado ?? "Error desconocido"), backgroundColor: Colors.red)
           );
         }
       }
@@ -658,6 +666,7 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                   
                   // ESTAS SON LAS OPCIONES QUE CAEN HACIA ABAJO
                   onSelected: (value) {
+                    if (value == 'admin_panel') Navigator.push(context, MaterialPageRoute(builder: (context) => AdminScreen(token: widget.token)));
                     if (value == 'config') Navigator.push(context,MaterialPageRoute(builder: (context) => const ConfiguracionScreen()),).then((_) {_cargarDatos(); });
                     if (value == 'refresh') _cargarDatos();
                     if (value == 'logout') _cerrarSesion();
@@ -666,7 +675,16 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                     if (value == 'papelera') Navigator.push(context, MaterialPageRoute(builder: (context) => PapeleraScreen(token: widget.token))).then((_) => _cargarDatos());
                   },
                   itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
-                    // Opción 1: Configurar IP
+                    if (_esAdmin) 
+                      const PopupMenuItem<String>(
+                        value: 'admin_panel',
+                        child: ListTile(
+                          leading: Icon(Icons.admin_panel_settings, color: Colors.indigo),
+                          title: Text('Administración', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.indigo)),
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                      ),
+                    if (_esAdmin) const PopupMenuDivider(),
                     const PopupMenuItem<String>(
                       value: 'config',
                       child: Row(

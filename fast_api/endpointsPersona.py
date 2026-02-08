@@ -88,3 +88,23 @@ def eliminar_amigo(id_amigo: int, current_user_id: int = Depends(funcionesSeguri
     if not exito:
         raise HTTPException(status_code=400, detail=str(resultado))
     return {"mensaje": resultado}
+
+@router.get("/admin/soy-admin")
+def verificar_admin(current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+    return {"es_admin": consultasPersona.obtener_info_admin(current_user_id)}
+
+@router.get("/admin/usuarios")
+def listar_usuarios(current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+    if not consultasPersona.obtener_info_admin(current_user_id):
+        raise HTTPException(status_code=403, detail="Requiere ser administrador")
+    exito, datos = consultasPersona.listar_usuarios_con_uso()
+    if not exito: raise HTTPException(status_code=400, detail=str(datos))
+    return datos
+
+@router.put("/admin/cambiar-cuota")
+def cambiar_cuota(datos: modeloDatos.CambioCuota, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+    if not consultasPersona.obtener_info_admin(current_user_id):
+        raise HTTPException(status_code=403, detail="Requiere ser administrador")
+    exito, msg = consultasPersona.actualizar_cuota(datos.id_usuario, datos.nueva_cuota_bytes)
+    if not exito: raise HTTPException(status_code=400, detail=msg)
+    return {"mensaje": msg}

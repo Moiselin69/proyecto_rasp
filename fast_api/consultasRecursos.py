@@ -2,16 +2,78 @@ import db
 from mysql.connector import Error
 from datetime import datetime
 from typing import Optional, Tuple, Any
+import shutil
 
-def subir_recurso(id_creador: int, tipo: str, enlace: str, nombre: str, fecha_real: Optional[datetime] = None, id_album: Optional[int] = None):
+def procesar_archivo_local(id_usuario: int, ruta_fisica: str, nombre_original: str, tipo: str, fecha: Optional[datetime], id_album: Optional[int], reemplazar: bool) -> Tuple[bool, Any]:
+    """
+    Igual que subir_recurso, pero asume que el archivo ya existe físicamente en 'ruta_fisica'.
+    Se usa para los Chunked Uploads.
+    """
+    import os
+    from PIL import Image
+    import cv2
+    import shutil # Por si hay que mover
+    
+    # 1. Verificar Cuota
+    try:
+        tamano = os.path.getsize(ruta_fisica)
+        puede, msg = verificar_espacio_usuario(id_usuario, tamano)
+        if not puede:
+            os.remove(ruta_fisica)
+            return False, msg # Error 507
+    except Exception as e:
+        return False, f"Error verificando espacio: {e}"
+
+    # 2. Verificar Duplicado (Si no es reemplazar)
+    id_existente = check_recurso_existe_en_album(id_usuario, nombre_original, id_album)
+    if id_existente and not reemplazar:
+        os.remove(ruta_fisica)
+        return False, "DUPLICADO" # Señal para error 409
+
+    # 3. Generar Miniatura (Lógica reutilizada)
+    carpeta_miniatura = "static/thumbnails"
+    os.makedirs(carpeta_miniatura, exist_ok=True)
+    nombre_fisico = os.path.basename(ruta_fisica)
+    
+    try:
+        if tipo == "IMAGEN":
+            ruta_thumb = os.path.join(carpeta_miniatura, nombre_fisico)
+            with Image.open(ruta_fisica) as img:
+                img.thumbnail((300, 300))
+                if img.mode in ("RGBA", "P"): img = img.convert("RGB")
+                img.save(ruta_thumb)
+        elif tipo == "VIDEO":
+            nombre_thumb_jpg = os.path.splitext(nombre_fisico)[0] + ".jpg"
+            ruta_thumb = os.path.join(carpeta_miniatura, nombre_thumb_jpg)
+            cam = cv2.VideoCapture(ruta_fisica)
+            try:
+                cam.set(cv2.CAP_PROP_POS_FRAMES, 10)
+                ret, frame = cam.read()
+                if ret:
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    with Image.fromarray(frame_rgb) as img:
+                        img.thumbnail((300, 300))
+                        img.save(ruta_thumb, format="JPEG")
+            finally:
+                cam.release()
+    except Exception as e:
+        print(f"Warning miniatura: {e}")
+
+    # 4. Guardar en BD
+    if id_existente and reemplazar:
+        return reemplazar_recurso_simple(id_existente, ruta_fisica, tipo, tamano, fecha, id_usuario)
+    else:
+        return subir_recurso(id_usuario, tipo, ruta_fisica, nombre_original, tamano, fecha, id_album)
+
+def subir_recurso(id_creador: int, tipo: str, enlace: str, nombre: str, tamano: int, fecha_real: Optional[datetime] = None, id_album: Optional[int] = None) -> Tuple[bool, Any]:
     connection = None
     try:
         connection = db.get_connection()
-        connection.autocommit = False # Importante: Transacción para que se guarden las 3 cosas o ninguna
+        connection.autocommit = False 
         if connection.is_connected():
             cursor = connection.cursor()
-            query_1 = "INSERT INTO Recurso (id_creador, tipo, enlace, nombre, fecha_real) VALUES(%s,%s,%s,%s,%s)"
-            valores = (id_creador, tipo, enlace, nombre, fecha_real)
+            query_1 = "INSERT INTO Recurso (id_creador, tipo, enlace, nombre, tamano, fecha_real) VALUES(%s,%s,%s,%s,%s,%s)"
+            valores = (id_creador, tipo, enlace, nombre, tamano, fecha_real)
             cursor.execute(query_1, valores)
             id_recurso = cursor.lastrowid
             if id_album is not None:
@@ -28,6 +90,61 @@ def subir_recurso(id_creador: int, tipo: str, enlace: str, nombre: str, fecha_re
         if connection is not None and connection.is_connected():
             if 'cursor' in locals(): cursor.close()
             connection.close()
+
+def verificar_espacio_usuario(id_usuario: int, tamano_nuevo_archivo: int) -> Tuple[bool, str]:
+    connection = None
+    try:
+        connection = db.get_connection()
+        cursor = connection.cursor(dictionary=True)
+        sql_user = """
+            SELECT P.almacenamiento_maximo, COALESCE(SUM(R.tamano), 0) as usado
+            FROM Persona P
+            LEFT JOIN Recurso R ON P.id = R.id_creador AND R.fecha_eliminacion IS NULL
+            WHERE P.id = %s
+            GROUP BY P.id
+        """
+        cursor.execute(sql_user, (id_usuario,))
+        datos = cursor.fetchone()
+        if not datos: return False, "Usuario no encontrado"
+        limite_usuario = datos['almacenamiento_maximo'] # Puede ser None (Ilimitado)
+        usado_usuario = datos['usado']
+        total, used, free = shutil.disk_usage("static/uploads")
+        if tamano_nuevo_archivo > free:
+            return False, "El servidor está lleno (Espacio físico agotado)."
+        if limite_usuario is not None:
+            if (usado_usuario + tamano_nuevo_archivo) > limite_usuario:
+                return False, "Has superado tu cuota de almacenamiento asignada."
+        return True, "OK"
+    except Error as e:
+        return False, str(e)
+    finally:
+        if connection: connection.close()
+
+def reemplazar_recurso_simple(id_recurso: int, nuevo_enlace: str, nuevo_tipo: str, nuevo_tamano: int, nueva_fecha_real: Optional[datetime], id_usuario: int) -> Tuple[bool, Any]:
+    connection = None
+    cursor = None
+    try:
+        connection = db.get_connection()
+        connection.autocommit = False
+        cursor = connection.cursor()
+        cursor.execute("SELECT enlace FROM Recurso WHERE id = %s AND id_creador = %s", (id_recurso, id_usuario))
+        resultado = cursor.fetchone()
+        if not resultado: return False, "Recurso no encontrado"
+        ruta_vieja = resultado[0]
+        sql_update = """
+            UPDATE Recurso 
+            SET enlace = %s, tipo = %s, tamano = %s, fecha_real = %s, fecha_subida = NOW(), fecha_eliminacion = NULL
+            WHERE id = %s AND id_creador = %s
+        """
+        cursor.execute(sql_update, (nuevo_enlace, nuevo_tipo, nuevo_tamano, nueva_fecha_real, id_recurso, id_usuario))
+        connection.commit()
+        return True, ruta_vieja
+    except Error as e:
+        if connection: connection.rollback()
+        return False, str(e)
+    finally:
+        if cursor: cursor.close()
+        if connection: connection.close()
 
 def obtener_recursos(id_persona:int):
     connection = None

@@ -59,3 +59,7 @@ class RespuestaPeticionRecurso(BaseModel):
     id_emisor: int
     id_recurso: int
     aceptar: bool
+
+class CambioCuota(BaseModel):
+    id_usuario: int
+    nueva_cuota_bytes: int | None = None

@@ -5,6 +5,7 @@ import "../models/recursos.dart";
 import 'dart:io';
 import "../models/album.dart";
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:path/path.dart' as path;
 
 class ApiService {
   static String baseUrl = "http://192.168.1.6:8000";
@@ -500,6 +501,136 @@ class ApiService {
       return data['existe'] == true;
     }
     return false; // Si falla, asumimos false para intentar subir y que el backend decida
+  }
+
+  Future<bool> soyAdmin(String token) async {
+    try {
+      final r = await http.get(Uri.parse('$baseUrl/admin/soy-admin'), headers: {'Authorization': 'Bearer $token'});
+      return r.statusCode == 200 && jsonDecode(r.body)['es_admin'] == true;
+    } catch (e) { return false; }
+  }
+
+  Future<Map<String, dynamic>> getUsuariosAdmin(String token) async {
+    final r = await http.get(Uri.parse('$baseUrl/admin/usuarios'), headers: {'Authorization': 'Bearer $token'});
+    if (r.statusCode == 200) {
+      return jsonDecode(r.body);
+    }
+    throw Exception(r.body);
+  }
+
+  Future<String?> cambiarCuota(String token, int idUsuario, int? bytes) async {
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/admin/cambiar-cuota'),
+        headers: {
+          'Authorization': 'Bearer $token', 
+          'Content-Type': 'application/json'
+        },
+        body: jsonEncode({'id_usuario': idUsuario, 'nueva_cuota_bytes': bytes})
+      );
+
+      if (response.statusCode == 200) {
+        return null; // NULL significa ÉXITO (Sin error)
+      } else {
+        try {
+          final body = jsonDecode(response.body);
+          return body['detail'] ?? "Error desconocido al cambiar la cuota";
+        } catch (_) {
+          return "Error ${response.statusCode}: ${response.body}";
+        }
+      }
+    } catch (e) {
+      return "Error de conexión: $e";
+    }
+  }
+
+  Future<String?> subirPorChunks(
+    String token, 
+    File archivo, 
+    String tipo, 
+    {int? idAlbum, bool reemplazar = false}
+  ) async {
+    try {
+      int totalSize = await archivo.length();
+      String fileName = path.basename(archivo.path);
+      
+      // 1. INIT: Pedir ID
+      final respInit = await http.post(
+        Uri.parse('$baseUrl/upload/init'),
+        headers: {'Authorization': 'Bearer $token'}
+      );
+      if (respInit.statusCode != 200) return "Error iniciando subida";
+      String uploadId = jsonDecode(respInit.body)['upload_id'];
+
+      // 2. CHUNKS: Bucle de subida
+      // Tamaño del chunk: 1MB (equilibrado para móvil)
+      int chunkSize = 1 * 1024 * 1024; 
+      int totalChunks = (totalSize / chunkSize).ceil();
+      
+      // Abrimos el archivo para lectura aleatoria
+      var accessFile = await archivo.open();
+      
+      for (int i = 0; i < totalChunks; i++) {
+        int start = i * chunkSize;
+        int end = start + chunkSize;
+        if (end > totalSize) end = totalSize;
+        
+        // Leemos solo el trocito en memoria
+        int length = end - start;
+        List<int> buffer = List<int>.filled(length, 0);
+        await accessFile.setPosition(start);
+        await accessFile.readInto(buffer); // Leemos bytes
+
+        // Enviamos el trocito
+        var request = http.MultipartRequest('POST', Uri.parse('$baseUrl/upload/chunk'));
+        request.headers['Authorization'] = 'Bearer $token';
+        request.fields['upload_id'] = uploadId;
+        request.fields['chunk_index'] = i.toString();
+        
+        request.files.add(http.MultipartFile.fromBytes(
+          'file', 
+          buffer, 
+          filename: 'chunk_$i'
+        ));
+
+        var respChunk = await request.send();
+        if (respChunk.statusCode != 200) {
+          await accessFile.close();
+          return "Error subiendo parte ${i+1} de $totalChunks";
+        }
+        
+        // Opcional: Aquí podrías notificar progreso a la UI
+        double progress = (i + 1) / totalChunks;
+        print("Subiendo: ${(progress * 100).toStringAsFixed(0)}%");
+      }
+      
+      await accessFile.close();
+
+      // 3. COMPLETE: Ensamblar
+      var reqComplete = http.MultipartRequest('POST', Uri.parse('$baseUrl/upload/complete'));
+      reqComplete.headers['Authorization'] = 'Bearer $token';
+      reqComplete.fields['upload_id'] = uploadId;
+      reqComplete.fields['nombre_archivo'] = fileName;
+      reqComplete.fields['total_chunks'] = totalChunks.toString();
+      reqComplete.fields['tipo'] = tipo;
+      reqComplete.fields['reemplazar'] = reemplazar.toString();
+      if (idAlbum != null) reqComplete.fields['id_album'] = idAlbum.toString();
+
+      var respComplete = await reqComplete.send();
+      final respStr = await respComplete.stream.bytesToString();
+
+      if (respComplete.statusCode == 200) {
+        return jsonDecode(respStr)['mensaje'];
+      } else if (respComplete.statusCode == 409) {
+        return "DUPLICADO"; // Para manejar la lógica de preguntar reemplazo
+      } else {
+        var json = jsonDecode(respStr);
+        return json['detail'] ?? "Error al completar subida";
+      }
+
+    } catch (e) {
+      return "Excepción de subida: $e";
+    }
   }
 
 }
