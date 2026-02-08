@@ -342,9 +342,9 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
 
   String _obtenerTipoArchivo(String pathArchivo) {
     String ext = path.extension(pathArchivo).toLowerCase();
-    if (['.jpg', '.jpeg', '.png', '.gif', '.webp'].contains(ext)) return 'IMAGEN';
-    if (['.mp4', '.mov', '.avi', '.mkv'].contains(ext)) return 'VIDEO';
-    if (['.mp3', '.wav', '.aac', '.flac'].contains(ext)) return 'AUDIO';
+    if (['.jpg', '.jpeg', '.png', '.gif', '.webp', '.heic', '.heif', '.bmp', '.tiff', '.tif'].contains(ext)) return 'IMAGEN';
+    if (['.mp4', '.mov', '.avi', '.mkv', '.m4v', '.3gp', '.wmv', '.flv', '.webm'].contains(ext)) return 'VIDEO';
+    if (['.mp3', '.wav', '.aac', '.flac', '.m4a', '.wma', '.ogg', '.aiff', '.caf'].contains(ext))return 'AUDIO';
     return 'ARCHIVO';
   }
 
