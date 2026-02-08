@@ -12,6 +12,7 @@ import "../services/download_service.dart";
 import 'gestionar_amistades_screen.dart';
 import 'configuracion_screen.dart';
 import 'compartidos_screen.dart';
+import 'papelera_screen.dart';
 
 class GaleriaScreen extends StatefulWidget {
   final String token;
@@ -564,6 +565,7 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                     if (value == 'logout') _cerrarSesion();
                     if (value == 'gestionar_amistades') Navigator.push(context, MaterialPageRoute(builder: (context) => const GestionarAmistadesScreen()));
                     if (value == 'compartidos') Navigator.push(context,MaterialPageRoute(builder: (context) => const CompartidosScreen()),);
+                    if (value == 'papelera') Navigator.push(context, MaterialPageRoute(builder: (context) => PapeleraScreen(token: widget.token))).then((_) => _cargarDatos());
                   },
                   itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
                     // Opción 1: Configurar IP
@@ -589,6 +591,14 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                       child: ListTile(
                         leading: Icon(Icons.folder_shared),
                         title: Text('Compartidos conmigo'),
+                      ),
+                    ),
+                    const PopupMenuItem<String>(
+                      value: 'papelera',
+                      child: ListTile(
+                        leading: Icon(Icons.delete_outline, color: Colors.grey),
+                        title: Text('Papelera'),
+                        contentPadding: EdgeInsets.zero, // Ajuste visual para alinear con los Rows
                       ),
                     ),
                     const PopupMenuItem<String>(
