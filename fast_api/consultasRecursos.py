@@ -1,7 +1,7 @@
 import db
 from mysql.connector import Error
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Tuple, Any
 
 def subir_recurso(id_creador: int, tipo: str, enlace: str, nombre: str, fecha_real: Optional[datetime] = None, id_album: Optional[int] = None):
     connection = None
@@ -40,7 +40,7 @@ def obtener_recursos(id_persona:int):
                 FROM Recurso r 
                 JOIN Recurso_Persona rp ON r.id=rp.id_recurso 
                 LEFT JOIN Recurso_Album ra ON r.id = ra.id_recurso
-                WHERE rp.id_persona=%s
+                WHERE rp.id_persona=%s AND r.fecha_eliminacion IS NULL
                 ORDER BY r.fecha_real DESC
             """
             valores = (id_persona, )
@@ -351,3 +351,100 @@ def obtener_compartidos_conmigo(id_receptor):
         return False, str(e)
     finally:
         if conexion: conexion.close()
+
+def mover_a_papelera(id_recurso: int, id_usuario: int) -> Tuple[bool, Any]:
+    """Soft Delete: Marca el recurso como eliminado pero no lo borra."""
+    connection = None
+    cursor = None
+    try:
+        connection = db.get_connection()
+        cursor = connection.cursor()
+        # Actualizamos la fecha de eliminación
+        sql = "UPDATE Recurso SET fecha_eliminacion = NOW() WHERE id = %s AND id_creador = %s"
+        cursor.execute(sql, (id_recurso, id_usuario))
+        connection.commit()
+        
+        if cursor.rowcount > 0:
+            return True, "Recurso movido a la papelera"
+        else:
+            return False, "No se encontró el recurso o no eres el creador"
+    except Exception as e:
+        return False, str(e)
+    finally:
+        if cursor: cursor.close()
+        if connection and connection.is_connected(): connection.close()
+
+def restaurar_recurso_bd(id_recurso: int, id_usuario: int) -> Tuple[bool, Any]:
+    """Recupera un recurso de la papelera."""
+    connection = None
+    cursor = None
+    try:
+        connection = db.get_connection()
+        cursor = connection.cursor()
+        sql = "UPDATE Recurso SET fecha_eliminacion = NULL WHERE id = %s AND id_creador = %s"
+        cursor.execute(sql, (id_recurso, id_usuario))
+        connection.commit()
+        
+        if cursor.rowcount > 0:
+            return True, "Restaurado"
+        return False, "No se encontró en la papelera"
+    except Exception as e:
+        return False, str(e)
+    finally:
+        if cursor: cursor.close()
+        if connection and connection.is_connected(): connection.close()
+
+def obtener_papelera_bd(id_usuario: int) -> Tuple[bool, Any]:
+    """Obtiene solo los recursos que ESTÁN en la papelera."""
+    connection = None
+    cursor = None
+    try:
+        connection = db.get_connection()
+        cursor = connection.cursor(dictionary=True)
+        sql = """
+            SELECT * FROM Recurso 
+            WHERE id_creador = %s AND fecha_eliminacion IS NOT NULL 
+            ORDER BY fecha_eliminacion DESC
+        """
+        cursor.execute(sql, (id_usuario,))
+        resultado = cursor.fetchall()
+        
+        # Opcional: Agregar URLs también aquí por si quieres mostrar miniaturas en la papelera
+        for recurso in resultado:
+            recurso['url_thumbnail'] = f"/recurso/archivo/{recurso['id']}?size=small"
+
+        return True, resultado
+    except Exception as e:
+        return False, str(e)
+    finally:
+        if cursor: cursor.close()
+        if connection and connection.is_connected(): connection.close()
+
+def eliminar_definitivamente_bd(id_recurso: int, id_usuario: int) -> Tuple[bool, Any]:
+    """Hard Delete: Elimina de la BD y devuelve la ruta para borrar el archivo físico."""
+    connection = None
+    cursor = None
+    try:
+        connection = db.get_connection()
+        cursor = connection.cursor(dictionary=True)
+        
+        # 1. Obtenemos la ruta antes de borrar
+        sql_select = "SELECT enlace, tipo FROM Recurso WHERE id = %s AND id_creador = %s"
+        cursor.execute(sql_select, (id_recurso, id_usuario))
+        recurso = cursor.fetchone()
+        
+        if not recurso:
+            return False, "No encontrado o sin permisos"
+
+        # 2. Borramos de la BD
+        sql_delete = "DELETE FROM Recurso WHERE id = %s AND id_creador = %s"
+        cursor.execute(sql_delete, (id_recurso, id_usuario))
+        connection.commit()
+        
+        # Devolvemos la ruta (enlace) para que el endpoint se encargue del os.remove
+        return True, recurso['enlace'] 
+    except Exception as e:
+        return False, str(e)
+    finally:
+        if cursor: cursor.close()
+        if connection and connection.is_connected(): connection.close()

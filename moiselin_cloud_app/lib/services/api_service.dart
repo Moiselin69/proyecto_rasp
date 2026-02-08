@@ -450,4 +450,34 @@ class ApiService {
     }
   }
 
+  Future<List<Recurso>> obtenerPapelera(String token) async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/recurso/papelera'),
+      headers: {'Authorization': 'Bearer $token'},
+    );
+
+    if (response.statusCode == 200) {
+      List<dynamic> data = jsonDecode(response.body);
+      return data.map((json) => Recurso.fromJson(json)).toList();
+    } else {
+      throw Exception('Error al cargar la papelera');
+    }
+  }
+
+  Future<bool> restaurarRecurso(String token, int idRecurso) async {
+    final response = await http.put(
+      Uri.parse('$baseUrl/recurso/restaurar/$idRecurso'),
+      headers: {'Authorization': 'Bearer $token'},
+    );
+    return response.statusCode == 200;
+  }
+
+  Future<bool> eliminarDefinitivo(String token, int idRecurso) async {
+    final response = await http.delete(
+      Uri.parse('$baseUrl/recurso/eliminar-definitivo/$idRecurso'),
+      headers: {'Authorization': 'Bearer $token'},
+    );
+    return response.statusCode == 200;
+  }
+
 }

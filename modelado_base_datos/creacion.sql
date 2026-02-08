@@ -19,6 +19,7 @@ CREATE TABLE Persona(
 	nombre VARCHAR(100) NOT NULL,
 	apellidos VARCHAR(100),
 	fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+	fecha_eliminacion DATETIME DEFAULT NULL,
 	CONSTRAINT pk_id PRIMARY KEY (id)
 )ENGINE=InnoDB;
 
@@ -39,6 +40,7 @@ CREATE TABLE Recurso(
 	nombre VARCHAR(100),
 	fecha_real DATETIME,
 	fecha_subida TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+	fecha_eliminacion DATETIME DEFAULT NULL,
 	CONSTRAINT pk_recurso PRIMARY KEY(id),
 	CONSTRAINT fk_recurso_creador FOREIGN KEY (id_creador) REFERENCES Persona(id) ON DELETE SET NULL
 )ENGINE=InnoDB;
