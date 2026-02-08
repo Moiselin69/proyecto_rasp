@@ -548,13 +548,17 @@ class ApiService {
     String token, 
     File archivo, 
     String tipo, 
-    {int? idAlbum, bool reemplazar = false}
+    {
+      int? idAlbum, 
+      bool reemplazar = false,
+      Function(double)? onProgress, // <--- NUEVO PARÁMETRO
+    }
   ) async {
     try {
       int totalSize = await archivo.length();
       String fileName = path.basename(archivo.path);
       
-      // 1. INIT: Pedir ID
+      // 1. INIT
       final respInit = await http.post(
         Uri.parse('$baseUrl/upload/init'),
         headers: {'Authorization': 'Bearer $token'}
@@ -562,12 +566,10 @@ class ApiService {
       if (respInit.statusCode != 200) return "Error iniciando subida";
       String uploadId = jsonDecode(respInit.body)['upload_id'];
 
-      // 2. CHUNKS: Bucle de subida
-      // Tamaño del chunk: 1MB (equilibrado para móvil)
-      int chunkSize = 1 * 1024 * 1024; 
+      // 2. CHUNKS
+      int chunkSize = 1 * 1024 * 1024; // 1MB
       int totalChunks = (totalSize / chunkSize).ceil();
       
-      // Abrimos el archivo para lectura aleatoria
       var accessFile = await archivo.open();
       
       for (int i = 0; i < totalChunks; i++) {
@@ -575,38 +577,35 @@ class ApiService {
         int end = start + chunkSize;
         if (end > totalSize) end = totalSize;
         
-        // Leemos solo el trocito en memoria
         int length = end - start;
         List<int> buffer = List<int>.filled(length, 0);
         await accessFile.setPosition(start);
-        await accessFile.readInto(buffer); // Leemos bytes
+        await accessFile.readInto(buffer);
 
-        // Enviamos el trocito
         var request = http.MultipartRequest('POST', Uri.parse('$baseUrl/upload/chunk'));
         request.headers['Authorization'] = 'Bearer $token';
         request.fields['upload_id'] = uploadId;
         request.fields['chunk_index'] = i.toString();
         
-        request.files.add(http.MultipartFile.fromBytes(
-          'file', 
-          buffer, 
-          filename: 'chunk_$i'
-        ));
+        request.files.add(http.MultipartFile.fromBytes('file', buffer, filename: 'chunk_$i'));
 
         var respChunk = await request.send();
         if (respChunk.statusCode != 200) {
           await accessFile.close();
-          return "Error subiendo parte ${i+1} de $totalChunks";
+          return "Error subiendo parte ${i+1}";
         }
         
-        // Opcional: Aquí podrías notificar progreso a la UI
-        double progress = (i + 1) / totalChunks;
-        print("Subiendo: ${(progress * 100).toStringAsFixed(0)}%");
+        // --- NOTIFICAR PROGRESO ---
+        if (onProgress != null) {
+          double porcentaje = (i + 1) / totalChunks;
+          onProgress(porcentaje);
+        }
+        // --------------------------
       }
       
       await accessFile.close();
 
-      // 3. COMPLETE: Ensamblar
+      // 3. COMPLETE
       var reqComplete = http.MultipartRequest('POST', Uri.parse('$baseUrl/upload/complete'));
       reqComplete.headers['Authorization'] = 'Bearer $token';
       reqComplete.fields['upload_id'] = uploadId;
@@ -620,16 +619,20 @@ class ApiService {
       final respStr = await respComplete.stream.bytesToString();
 
       if (respComplete.statusCode == 200) {
-        return jsonDecode(respStr)['mensaje'];
+        return jsonDecode(respStr)['mensaje']; // Éxito
       } else if (respComplete.statusCode == 409) {
-        return "DUPLICADO"; // Para manejar la lógica de preguntar reemplazo
+        return "DUPLICADO"; 
       } else {
-        var json = jsonDecode(respStr);
-        return json['detail'] ?? "Error al completar subida";
+        // Intentar leer error del backend
+        try {
+            return jsonDecode(respStr)['detail'];
+        } catch (_) {
+            return "Error al completar subida";
+        }
       }
 
     } catch (e) {
-      return "Excepción de subida: $e";
+      return "Excepción: $e";
     }
   }
 

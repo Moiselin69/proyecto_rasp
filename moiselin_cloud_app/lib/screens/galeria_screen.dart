@@ -35,6 +35,8 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
   final DownloadService _downloadService = DownloadService();
   bool _cargando = true;
   bool _esAdmin = false;
+  bool _subiendo = false;
+  double _progreso = 0.0;
   String _filtroSeleccionado = "Todos"; 
   List<Recurso> _todosLosRecursos = []; 
   List<Recurso> _recursosFiltrados = []; 
@@ -362,61 +364,79 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
 
   Future<void> _subirArchivoUniversal() async {
     FilePickerResult? result = await FilePicker.platform.pickFiles(allowMultiple: false);
+
     if (result != null && result.files.single.path != null) {
       File file = File(result.files.single.path!);
-      String nombreArchivo = result.files.single.name; // El nombre original (ej: "vacaciones.jpg")
+      String nombreArchivo = result.files.single.name;
       String tipo = _obtenerTipoArchivo(file.path);
+      
+      // 1. Verificar duplicado (esto se queda igual)
       bool existe = await _apiService.verificarDuplicado(widget.token, nombreArchivo, widget.parentId);
       bool reemplazar = false;
       if (existe) {
         bool? confirmacion = await showDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
-            title: Text("Archivo duplicado"),
-            content: Text(
-              "Ya existe un archivo llamado '$nombreArchivo' en esta carpeta.\n\n"
-              "¿Deseas reemplazarlo? Se guardará una copia de la versión anterior en el historial."
-            ),
+            title: const Text("Archivo duplicado"),
+            content: Text("Ya existe '$nombreArchivo'. ¿Deseas reemplazarlo?"),
             actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false), // CANCELAR
-                child: Text("Cancelar"),
-              ),
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Cancelar")),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
-                onPressed: () => Navigator.pop(ctx, true), // CONFIRMAR
-                child: Text("Reemplazar", style: TextStyle(color: Colors.white)),
+                onPressed: () => Navigator.pop(ctx, true), 
+                child: const Text("Reemplazar", style: TextStyle(color: Colors.white))
               ),
             ],
           ),
         );
-        if (confirmacion != true) {
-          return; 
-        }
+        if (confirmacion != true) return; 
         reemplazar = true;
       }
-      setState(() => _cargando = true);
-      String? resultado = await _apiService.subirPorChunks(widget.token, file, tipo, idAlbum: widget.parentId,reemplazar: reemplazar);
-      if (resultado != null && !resultado.contains("Error") && resultado != "DUPLICADO") {
-        // ÉXITO
-        bool borrar = await ApiService.getBorrarAlSubir();
-        if (borrar) { try { if (await file.exists()) await file.delete(); } catch (e) {} }
-        
-        if (mounted) {
+
+      // --- CAMBIO 1: Estado visual ---
+      // NO usamos _cargando = true porque eso bloquea la pantalla blanca.
+      // Usamos _subiendo para mostrar la barra flotante.
+      setState(() {
+        _subiendo = true; 
+        _progreso = 0.0;
+      });
+
+      // --- CAMBIO 2: Llamada con onProgress ---
+      String? resultado = await _apiService.subirPorChunks(
+        widget.token, 
+        file, 
+        tipo, 
+        idAlbum: widget.parentId,
+        reemplazar: reemplazar,
+        onProgress: (p) {
+          // Esto actualiza la barra cada vez que se sube un trozo
+          if (mounted) setState(() => _progreso = p);
+        }
+      );
+
+      // --- CAMBIO 3: Gestión del final ---
+      if (mounted) {
+        setState(() => _subiendo = false); // Ocultamos la barra flotante
+
+        if (resultado != null && !resultado.contains("Error") && resultado != "DUPLICADO") {
+          // ÉXITO
+          bool borrar = await ApiService.getBorrarAlSubir();
+          if (borrar) { try { if (await file.exists()) await file.delete(); } catch (e) {} }
+          
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(resultado), backgroundColor: Colors.green)
           );
-        }
-        _cargarDatos();
-      } else {
-        // ERROR
-        if (mounted) {
+          
+          _cargarDatos(); // Recargamos el Grid para ver la foto nueva
+        } else {
+          // ERROR
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(resultado ?? "Error desconocido"), backgroundColor: Colors.red)
           );
         }
       }
-      setState(() => _cargando = false);
+      
+      // Ya NO ponemos _cargando = false porque nunca lo pusimos a true.
     }
   }
 
@@ -783,105 +803,147 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
               ]
             ],
       ),
-      body: Column(
+      body: Stack(
         children: [
-          // Filtros
-          Container(
-            height: 60,
-            padding: EdgeInsets.symmetric(vertical: 10),
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              padding: EdgeInsets.symmetric(horizontal: 10),
-              itemCount: _categorias.length,
-              itemBuilder: (context, index) {
-                final cat = _categorias[index];
-                final isSelected = _filtroSeleccionado == cat;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8.0),
-                  child: FilterChip(
-                    label: Text(cat),
-                    selected: isSelected,
-                    onSelected: (bool selected) { if (selected) _aplicarFiltro(cat); },
-                    backgroundColor: Colors.grey[100],
-                    selectedColor: Colors.blue[100],
-                    labelStyle: TextStyle(
-                      color: isSelected ? Colors.blue[900] : Colors.black87,
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                    ),
-                    checkmarkColor: Colors.blue[900],
-                    shape: StadiumBorder(side: BorderSide(color: Colors.transparent)),
-                  ),
-                );
-              },
-            ),
+          // CAPA 1: TU CONTENIDO ORIGINAL (Filtros + Grid)
+          // Aquí pegamos tu Column exactamente como la tenías
+          Column(
+            children: [
+              // Filtros
+              Container(
+                height: 60,
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  itemCount: _categorias.length,
+                  itemBuilder: (context, index) {
+                    final cat = _categorias[index];
+                    final isSelected = _filtroSeleccionado == cat;
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 8.0),
+                      child: FilterChip(
+                        label: Text(cat),
+                        selected: isSelected,
+                        onSelected: (bool selected) { if (selected) _aplicarFiltro(cat); },
+                        backgroundColor: Colors.grey[100],
+                        selectedColor: Colors.blue[100],
+                        labelStyle: TextStyle(
+                          color: isSelected ? Colors.blue[900] : Colors.black87,
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        ),
+                        checkmarkColor: Colors.blue[900],
+                        shape: const StadiumBorder(side: BorderSide(color: Colors.transparent)),
+                      ),
+                    );
+                  },
+                ),
+              ),
+
+              // Grid
+              Expanded(
+                child: _cargando 
+                  ? const Center(child: CircularProgressIndicator())
+                  : (_albumesVisibles.isEmpty && _recursosFiltrados.isEmpty)
+                      ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: const [Icon(Icons.search_off, size: 60, color: Colors.grey), SizedBox(height: 10), Text("Carpeta vacía")]))
+                      : GridView.builder(
+                          padding: const EdgeInsets.all(8),
+                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 3, 
+                            crossAxisSpacing: 8,
+                            mainAxisSpacing: 8,
+                            childAspectRatio: 0.8,
+                          ),
+                          itemCount: _albumesFiltrados.length + _recursosFiltrados.length,
+                          itemBuilder: (context, index) {
+                            if (index < _albumesFiltrados.length) {
+                              return _buildCarpeta(_albumesFiltrados[index]);
+                            } else {
+                              final recurso = _recursosFiltrados[index - _albumesFiltrados.length];
+                              final isSelected = _recursosSeleccionados.contains(recurso.id);
+                              final urlImagen = "${ApiService.baseUrl}${recurso.urlThumbnail}";
+                              return GestureDetector(
+                                onLongPress: () => _toggleSeleccionRecurso(recurso.id),
+                                onTap: () {
+                                  if (_modoSeleccion) {
+                                    _toggleSeleccionRecurso(recurso.id);
+                                  } else {
+                                    Navigator.push(context, MaterialPageRoute(builder: (_) => DetalleRecursoScreen(recurso: recurso, token: widget.token))).then((_) => _cargarDatos());
+                                  }
+                                },
+                                child: Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: (recurso.esImagen || recurso.esVideo)
+                                        ? CachedNetworkImage(
+                                            imageUrl: urlImagen,
+                                            httpHeaders: {"Authorization": "Bearer ${widget.token}"},
+                                            fit: BoxFit.cover,
+                                            placeholder: (context, url) => Container(color: Colors.grey[200]),
+                                            errorWidget: (context, url, error) => const Icon(Icons.error),
+                                          )
+                                        : _getIconoArchivo(recurso),
+                                    ),
+                                    if (recurso.tipo == "VIDEO")
+                                      Center(child: Container(decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle), child: const Icon(Icons.play_arrow, color: Colors.white, size: 30))),
+                                    if (_modoSeleccion)
+                                      Container(
+                                        decoration: BoxDecoration(
+                                          color: isSelected ? Colors.blue.withOpacity(0.4) : Colors.transparent,
+                                          borderRadius: BorderRadius.circular(12),
+                                          border: isSelected ? Border.all(color: Colors.blue, width: 3) : null,
+                                        ),
+                                        child: isSelected 
+                                          ? const Icon(Icons.check_circle, color: Colors.white, size: 30)
+                                          : const Align(alignment: Alignment.topRight, child: Padding(padding: EdgeInsets.all(8), child: Icon(Icons.radio_button_unchecked, color: Colors.white))),
+                                      ),
+                                  ],
+                                ),
+                              );
+                            }
+                          },
+                        ),
+              ),
+            ],
           ),
 
-          // Grid
-          Expanded(
-            child: _cargando 
-              ? Center(child: CircularProgressIndicator())
-              : (_albumesVisibles.isEmpty && _recursosFiltrados.isEmpty)
-                  ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.search_off, size: 60, color: Colors.grey), SizedBox(height: 10), Text("Carpeta vacía")]))
-                  : GridView.builder(
-                      padding: EdgeInsets.all(8),
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 3, 
-                        crossAxisSpacing: 8,
-                        mainAxisSpacing: 8,
-                        childAspectRatio: 0.8,
+          // CAPA 2: LA BARRA DE PROGRESO FLOTANTE (Solo visible si _subiendo es true)
+          if (_subiendo)
+            Positioned(
+              bottom: 80, // Lo subo un poco (80) para que no tape el botón flotante (+)
+              left: 20,
+              right: 20,
+              child: Card(
+                elevation: 10,
+                color: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text("Subiendo archivo...", style: TextStyle(fontWeight: FontWeight.bold)),
+                          Text("${(_progreso * 100).toStringAsFixed(0)}%", style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
+                        ],
                       ),
-                      itemCount: _albumesFiltrados.length + _recursosFiltrados.length,
-                      itemBuilder: (context, index) {
-                        if (index < _albumesFiltrados.length) {
-                          return _buildCarpeta(_albumesFiltrados[index]);
-                        } else {
-                          final recurso = _recursosFiltrados[index - _albumesFiltrados.length];
-                          final isSelected = _recursosSeleccionados.contains(recurso.id);
-                          final urlImagen = "${ApiService.baseUrl}${recurso.urlThumbnail}";
-                          return GestureDetector(
-                            onLongPress: () => _toggleSeleccionRecurso(recurso.id),
-                            onTap: () {
-                              if (_modoSeleccion) {
-                                _toggleSeleccionRecurso(recurso.id);
-                              } else {
-                                Navigator.push(context, MaterialPageRoute(builder: (_) => DetalleRecursoScreen(recurso: recurso, token: widget.token))).then((_) => _cargarDatos());
-                              }
-                            },
-                            child: Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: (recurso.esImagen || recurso.esVideo)
-                                    ? CachedNetworkImage(
-                                        imageUrl: urlImagen,
-                                        httpHeaders: {"Authorization": "Bearer ${widget.token}"},
-                                        fit: BoxFit.cover,
-                                        placeholder: (context, url) => Container(color: Colors.grey[200]),
-                                        errorWidget: (context, url, error) => Icon(Icons.error),
-                                      )
-                                    : _getIconoArchivo(recurso),
-                                ),
-                                if (recurso.tipo == "VIDEO")
-                                  Center(child: Container(decoration: BoxDecoration(color: Colors.black45, shape: BoxShape.circle), child: Icon(Icons.play_arrow, color: Colors.white, size: 30))),
-                                if (_modoSeleccion)
-                                  Container(
-                                    decoration: BoxDecoration(
-                                      color: isSelected ? Colors.blue.withOpacity(0.4) : Colors.transparent,
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: isSelected ? Border.all(color: Colors.blue, width: 3) : null,
-                                    ),
-                                    child: isSelected 
-                                      ? Icon(Icons.check_circle, color: Colors.white, size: 30)
-                                      : Align(alignment: Alignment.topRight, child: Padding(padding: EdgeInsets.all(8), child: Icon(Icons.radio_button_unchecked, color: Colors.white))),
-                                  ),
-                              ],
-                            ),
-                          );
-                        }
-                      },
-                    ),
-          ),
+                      const SizedBox(height: 10),
+                      LinearProgressIndicator(
+                        value: _progreso,
+                        minHeight: 8,
+                        borderRadius: BorderRadius.circular(5),
+                        backgroundColor: Colors.grey[200],
+                        color: Colors.blue,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
       floatingActionButton: Column(
