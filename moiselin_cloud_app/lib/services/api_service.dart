@@ -636,4 +636,25 @@ class ApiService {
     }
   }
 
+  Future<bool> borrarLote(String token, List<int> ids) async {
+    final response = await http.put(
+      Uri.parse('$baseUrl/recurso/lote/papelera'),
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode({'ids': ids})
+    );
+    return response.statusCode == 200;
+  }
+
+  Future<bool> moverLote(String token, List<int> ids, int? idAlbumDestino) async {
+    final response = await http.put(
+      Uri.parse('$baseUrl/recurso/lote/mover'),
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'ids': ids,
+        'id_album_destino': idAlbumDestino // Puede ser null
+      })
+    );
+    return response.statusCode == 200;
+  }
+
 }

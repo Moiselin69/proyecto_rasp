@@ -1,7 +1,7 @@
 import db
 from mysql.connector import Error
 from datetime import datetime
-from typing import Optional, Tuple, Any
+from typing import Optional, Tuple, Any, List
 import shutil
 
 def procesar_archivo_local(id_usuario: int, ruta_fisica: str, nombre_original: str, tipo: str, fecha: Optional[datetime], id_album: Optional[int], reemplazar: bool) -> Tuple[bool, Any]:
@@ -711,3 +711,76 @@ def reemplazar_recurso_simple(id_recurso: int, nuevo_enlace: str, nuevo_tipo: st
     finally:
         if cursor: cursor.close()
         if connection and connection.is_connected(): connection.close()
+
+def mover_a_papelera_lote(ids: List[int], id_usuario: int) -> Tuple[bool, str]:
+    """Mueve una lista de recursos a la papelera en una sola transacción."""
+    connection = None
+    try:
+        connection = db.get_connection()
+        connection.autocommit = False 
+        cursor = connection.cursor()
+        
+        # Convertimos la lista de ints a string para SQL: (1, 2, 3)
+        # Usamos placeholders %s para seguridad
+        format_strings = ','.join(['%s'] * len(ids))
+        
+        # Query masiva
+        query = f"""
+            UPDATE Recurso 
+            SET fecha_eliminacion = NOW() 
+            WHERE id IN ({format_strings}) AND id_creador = %s
+        """
+        
+        # Pasamos los IDs + el id_usuario al final
+        valores = tuple(ids) + (id_usuario,)
+        
+        cursor.execute(query, valores)
+        filas_afectadas = cursor.rowcount
+        
+        connection.commit()
+        return True, f"{filas_afectadas} archivos movidos a la papelera"
+        
+    except Error as e:
+        if connection: connection.rollback()
+        return False, str(e)
+    finally:
+        if connection: connection.close()
+
+def mover_recursos_lote(ids: List[int], id_album_destino: Optional[int], id_usuario: int) -> Tuple[bool, str]:
+    """
+    Mueve una lista de recursos a otro álbum (o a la raíz).
+    Esta lógica es más compleja porque algunos recursos pueden estar ya en álbumes y otros no.
+    """
+    connection = None
+    try:
+        connection = db.get_connection()
+        connection.autocommit = False
+        cursor = connection.cursor()
+        
+        format_strings = ','.join(['%s'] * len(ids))
+        
+        # 1. Borramos las asociaciones previas de estos recursos con cualquier álbum
+        # (Para sacarlos de donde estén)
+        sql_delete = f"""
+            DELETE FROM Recurso_Album 
+            WHERE id_recurso IN ({format_strings}) 
+            AND id_recurso IN (SELECT id FROM Recurso WHERE id_creador = %s)
+        """
+        cursor.execute(sql_delete, tuple(ids) + (id_usuario,))
+        
+        # 2. Si el destino NO es la raíz, insertamos las nuevas asociaciones
+        if id_album_destino is not None:
+            sql_insert = "INSERT INTO Recurso_Album (id_recurso, id_album) VALUES (%s, %s)"
+            # Preparamos tuplas (id_recurso, id_album) para executemany
+            datos_insertar = [(id_r, id_album_destino) for id_r in ids]
+            cursor.executemany(sql_insert, datos_insertar)
+            
+        connection.commit()
+        dest = "la raíz" if id_album_destino is None else "la carpeta destino"
+        return True, f"Archivos movidos a {dest}"
+
+    except Error as e:
+        if connection: connection.rollback()
+        return False, str(e)
+    finally:
+        if connection: connection.close()

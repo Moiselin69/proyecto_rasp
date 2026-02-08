@@ -1,5 +1,6 @@
 from pydantic import BaseModel, EmailStr
 from datetime import datetime
+from typing import List, Optional
 
 class PersonaRegistro(BaseModel):
     nombre: str
@@ -63,3 +64,10 @@ class RespuestaPeticionRecurso(BaseModel):
 class CambioCuota(BaseModel):
     id_usuario: int
     nueva_cuota_bytes: int | None = None
+
+class LoteRecursos(BaseModel):
+    ids: List[int] # Lista de IDs [1, 5, 20, 44]
+
+class LoteMover(BaseModel):
+    ids: List[int]
+    id_album_destino: Optional[int] # Puede ser None si va a la raíz

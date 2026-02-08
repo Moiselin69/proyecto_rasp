@@ -299,3 +299,21 @@ def complete_upload(
     except Exception as e:
         print(f"Error completando subida: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/recurso/lote/papelera")
+def lote_papelera(
+    lote: modeloDatos.LoteRecursos, 
+    current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)
+):
+    exito, msg = consultasRecursos.mover_a_papelera_lote(lote.ids, current_user_id)
+    if not exito: raise HTTPException(status_code=400, detail=msg)
+    return {"mensaje": msg}
+
+@router.put("/recurso/lote/mover")
+def lote_mover(
+    lote: modeloDatos.LoteMover,
+    current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)
+):
+    exito, msg = consultasRecursos.mover_recursos_lote(lote.ids, lote.id_album_destino, current_user_id)
+    if not exito: raise HTTPException(status_code=400, detail=msg)
+    return {"mensaje": msg}

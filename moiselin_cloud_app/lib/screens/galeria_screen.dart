@@ -45,6 +45,7 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
   bool _buscando = false;
   final TextEditingController _searchController = TextEditingController();
   String _filtroOrden = "subida_desc";
+  String _mensajeSubida = "Subiendo...";
   
   // --- NUEVA LÓGICA DE SELECCIÓN MIXTA ---
   bool _modoSeleccion = false;
@@ -266,27 +267,35 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text("Eliminar $total elementos"),
-        content: Text("Se eliminarán las carpetas y archivos seleccionados. Las carpetas perderán su contenido."),
+        title: Text("Mover a papelera $total elementos"),
+        content: const Text("Los archivos seleccionados se moverán a la papelera."),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text("Cancelar")),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text("Eliminar", style: TextStyle(color: Colors.red))),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Cancelar")),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Eliminar", style: TextStyle(color: Colors.red))),
         ],
       ),
     );
 
     if (confirm == true) {
       setState(() => _cargando = true);
-      // Borrar Recursos
-      for (var id in _recursosSeleccionados) {
-        await _apiService.borrarRecurso(widget.token, id);
+      
+      // 1. Borrar Recursos en LOTE (Rapidísimo)
+      if (_recursosSeleccionados.isNotEmpty) {
+        await _apiService.borrarLote(widget.token, _recursosSeleccionados.toList());
       }
-      // Borrar Álbumes
+
+      // 2. Borrar Álbumes (Para álbumes, como son menos frecuentes, 
+      // podemos dejarlos en bucle o crear un endpoint de lote similar si quieres)
+      // Por ahora mantenemos el bucle para carpetas
       for (var id in _albumesSeleccionados) {
         await _apiService.borrarAlbum(widget.token, id);
       }
-      _limpiarSeleccion();
-      _cargarDatos();
+      
+      if (mounted) {
+        _limpiarSeleccion();
+        _cargarDatos();
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Elementos movidos a la papelera")));
+      }
     }
   }
 
@@ -341,16 +350,20 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
         setState(() => _cargando = true);
         
         // Mover Recursos
-        for (var id in _recursosSeleccionados) {
-          await _apiService.moverRecurso(widget.token, id, widget.parentId, destinoId); 
+        if (_recursosSeleccionados.isNotEmpty) {
+           await _apiService.moverLote(widget.token, _recursosSeleccionados.toList(), destinoId);
         }
-        // Mover Carpetas (Opcional, si lo implementaste en backend)
+        
+        // 2. Mover Carpetas (Opcional, bucle o lote)
         for (var id in _albumesSeleccionados) {
            await _apiService.moverAlbum(widget.token, id, destinoId);
         }
 
-        _limpiarSeleccion();
-        _cargarDatos();
+        if (mounted) {
+          _limpiarSeleccion();
+          _cargarDatos();
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Elementos movidos")));
+        }
     });
   }
 
@@ -363,80 +376,118 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
   }
 
   Future<void> _subirArchivoUniversal() async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles(allowMultiple: false);
+    // 1. Permitir múltiples archivos
+    FilePickerResult? result = await FilePicker.platform.pickFiles(allowMultiple: true);
 
-    if (result != null && result.files.single.path != null) {
-      File file = File(result.files.single.path!);
-      String nombreArchivo = result.files.single.name;
-      String tipo = _obtenerTipoArchivo(file.path);
+    if (result != null && result.files.isNotEmpty) {
       
-      // 1. Verificar duplicado (esto se queda igual)
-      bool existe = await _apiService.verificarDuplicado(widget.token, nombreArchivo, widget.parentId);
-      bool reemplazar = false;
-      if (existe) {
-        bool? confirmacion = await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text("Archivo duplicado"),
-            content: Text("Ya existe '$nombreArchivo'. ¿Deseas reemplazarlo?"),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Cancelar")),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
-                onPressed: () => Navigator.pop(ctx, true), 
-                child: const Text("Reemplazar", style: TextStyle(color: Colors.white))
-              ),
-            ],
-          ),
-        );
-        if (confirmacion != true) return; 
-        reemplazar = true;
-      }
-
-      // --- CAMBIO 1: Estado visual ---
-      // NO usamos _cargando = true porque eso bloquea la pantalla blanca.
-      // Usamos _subiendo para mostrar la barra flotante.
+      // Inicializamos la UI de subida
       setState(() {
-        _subiendo = true; 
+        _subiendo = true;
         _progreso = 0.0;
       });
 
-      // --- CAMBIO 2: Llamada con onProgress ---
-      String? resultado = await _apiService.subirPorChunks(
-        widget.token, 
-        file, 
-        tipo, 
-        idAlbum: widget.parentId,
-        reemplazar: reemplazar,
-        onProgress: (p) {
-          // Esto actualiza la barra cada vez que se sube un trozo
-          if (mounted) setState(() => _progreso = p);
-        }
-      );
+      int total = result.files.length;
+      int completados = 0;
+      int errores = 0;
+      
+      // Bucle para procesar cada archivo uno a uno (Cola secuencial)
+      for (int i = 0; i < total; i++) {
+        var fileInfo = result.files[i];
+        
+        if (fileInfo.path == null) continue;
+        
+        File file = File(fileInfo.path!);
+        String nombreArchivo = fileInfo.name;
+        String tipo = _obtenerTipoArchivo(file.path);
 
-      // --- CAMBIO 3: Gestión del final ---
-      if (mounted) {
-        setState(() => _subiendo = false); // Ocultamos la barra flotante
+        // Actualizamos el mensaje: "Subiendo 1 de 5: vacaciones.jpg"
+        if (mounted) {
+          setState(() {
+            _mensajeSubida = "Subiendo ${i + 1} de $total:\n$nombreArchivo";
+            _progreso = 0.0; // Reseteamos la barra para este archivo
+          });
+        }
+
+        // --- Verificación de Duplicado ---
+        bool existe = await _apiService.verificarDuplicado(widget.token, nombreArchivo, widget.parentId);
+        bool reemplazar = false;
+        
+        if (existe) {
+          // Pausamos el bucle para preguntar al usuario
+          bool? confirmacion = await showDialog<bool>(
+            context: context,
+            barrierDismissible: false, // Obligamos a responder
+            builder: (ctx) => AlertDialog(
+              title: Text("Archivo duplicado (${i + 1}/$total)"),
+              content: Text("'$nombreArchivo' ya existe.\n¿Deseas reemplazarlo?"),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false), // SALTAR este archivo
+                  child: const Text("Saltar"),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx, true), // REEMPLAZAR
+                  child: const Text("Reemplazar"),
+                ),
+              ],
+            ),
+          );
+          
+          if (confirmacion == null) {
+             // Si cierra el diálogo sin elegir, saltamos este archivo
+             continue; 
+          }
+          if (confirmacion == false) {
+             // Si elige "Saltar", no subimos y pasamos al siguiente
+             continue; 
+          }
+          reemplazar = true;
+        }
+
+        // --- Subida por Chunks ---
+        String? resultado = await _apiService.subirPorChunks(
+          widget.token, 
+          file, 
+          tipo, 
+          idAlbum: widget.parentId,
+          reemplazar: reemplazar,
+          onProgress: (p) {
+            if (mounted) setState(() => _progreso = p);
+          }
+        );
 
         if (resultado != null && !resultado.contains("Error") && resultado != "DUPLICADO") {
           // ÉXITO
+          completados++;
           bool borrar = await ApiService.getBorrarAlSubir();
           if (borrar) { try { if (await file.exists()) await file.delete(); } catch (e) {} }
-          
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(resultado), backgroundColor: Colors.green)
-          );
-          
-          _cargarDatos(); // Recargamos el Grid para ver la foto nueva
         } else {
           // ERROR
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(resultado ?? "Error desconocido"), backgroundColor: Colors.red)
-          );
+          errores++;
+          print("Error subiendo $nombreArchivo: $resultado");
         }
       }
-      
-      // Ya NO ponemos _cargando = false porque nunca lo pusimos a true.
+
+      // --- Final del proceso ---
+      if (mounted) {
+        setState(() => _subiendo = false);
+        _cargarDatos(); // Recargar galería
+
+        String mensajeFinal = "";
+        Color colorFinal = Colors.green;
+
+        if (errores == 0) {
+          mensajeFinal = "Se han subido $completados archivos correctamente.";
+        } else {
+          mensajeFinal = "Subidos: $completados. Errores: $errores.";
+          colorFinal = Colors.orange;
+        }
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(mensajeFinal), backgroundColor: colorFinal)
+        );
+      }
     }
   }
 
@@ -912,7 +963,7 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
           // CAPA 2: LA BARRA DE PROGRESO FLOTANTE (Solo visible si _subiendo es true)
           if (_subiendo)
             Positioned(
-              bottom: 80, // Lo subo un poco (80) para que no tape el botón flotante (+)
+              bottom: 80,
               left: 20,
               right: 20,
               child: Card(
@@ -923,12 +974,26 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start, // Alinear texto a la izquierda
                     children: [
+                      // Fila con Título y Porcentaje
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text("Subiendo archivo...", style: TextStyle(fontWeight: FontWeight.bold)),
-                          Text("${(_progreso * 100).toStringAsFixed(0)}%", style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
+                          // Usamos Flexible para que el nombre del archivo no rompa la fila si es largo
+                          Flexible(
+                            child: Text(
+                              _mensajeSubida, // <--- VARIABLE DINÁMICA
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            "${(_progreso * 100).toStringAsFixed(0)}%", 
+                            style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)
+                          ),
                         ],
                       ),
                       const SizedBox(height: 10),
