@@ -42,6 +42,7 @@ class RespuestaPeticionRecurso(BaseModel):
 
 class SolicitudNombre(BaseModel):
     nombre: str
+    reemplazar: bool = False
 
 class SolicitudFecha(BaseModel):
     fecha: datetime

@@ -6,9 +6,8 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:path/path.dart' as path;
+import 'package:path/path.dart' as path; // Importante para separar extensión
 
-// Asegúrate de que estos imports apunten a tus archivos reales
 import '../models/recursos.dart';
 import '../services/api_service.dart';
 import '../services/download_service.dart';
@@ -24,7 +23,9 @@ class DetalleRecursoScreen extends StatefulWidget {
 }
 
 class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
+  final ApiService _apiService = ApiService(); // Instancia para llamadas a la API
   final DownloadService _downloadService = DownloadService();
+  
   // Variables locales para edición
   late String _nombreActual;
   late DateTime? _fechaRealActual;
@@ -56,7 +57,7 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
       case "AUDIO":
         _inicializarAudio(urlCompleta);
         break;
-      case "ARCHIVO": // Asumiendo que es texto plano o similar
+      case "ARCHIVO":
         _futureTexto = _cargarTexto(urlCompleta);
         break;
     }
@@ -95,7 +96,6 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
       if (mounted) setState(() => _position = p);
     });
     
-    // Configurar la fuente pero no reproducir automáticamente
     _audioPlayer.setSourceUrl(url); 
   }
 
@@ -108,7 +108,7 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
     }
   }
 
-  // --- FUNCIONES DE ACCIÓN (Compartir, Descargar, Borrar, Editar) ---
+  // --- FUNCIONES DE ACCIÓN ---
 
   void _mostrarDialogoCompartir() {
     showDialog(
@@ -120,7 +120,7 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
             width: double.maxFinite,
             height: 300,
             child: FutureBuilder<List<dynamic>>(
-              future: ApiService.verAmigos(),
+              future: ApiService.verAmigos(), // Asegúrate que sea static o usa _apiService.verAmigos()
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
@@ -168,10 +168,7 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
 
   Future<void> _enviarRecurso(int idAmigo, String nombreAmigo) async {
     try {
-      // Ajuste para obtener el ID dependiendo de si tu modelo es una clase o un mapa
       final int idRecurso = widget.recurso.id; 
-
-      // Asumiendo que ApiService.compartirRecurso devuelve un String con el mensaje
       String mensaje = await ApiService.compartirRecurso(idRecurso, idAmigo);
 
       if (mounted) {
@@ -196,9 +193,9 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
     if (directorioDestino == null) return;
 
     String urlCompleta = "${ApiService.baseUrl}${widget.recurso.urlVisualizacion}";
-    String nombreFinal = widget.recurso.nombre;
+    String nombreFinal = _nombreActual; // Usamos el nombre actual por si se editó
 
-    // Añadir extensión si falta (lógica básica)
+    // Añadir extensión si falta
     if (path.extension(nombreFinal).isEmpty) {
       switch (widget.recurso.tipo) {
         case "VIDEO": nombreFinal += ".mp4"; break;
@@ -228,7 +225,7 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text("Eliminar archivo"),
-        content: const Text("¿Seguro que quieres eliminarlo?"),
+        content: const Text("Se moverá a la papelera de reciclaje."),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Cancelar")),
           TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Eliminar", style: TextStyle(color: Colors.red))),
@@ -237,42 +234,162 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
     );
 
     if (confirm == true) {
-      // Necesitarás tener este método en tu ApiService
-      // bool exito = await _apiService.borrarRecurso(widget.token, widget.recurso.id);
-      // Por ahora simulo éxito si no tienes la función implementada:
-      bool exito = true; 
+      // Usamos el servicio real para borrar (mover a papelera)
+      bool exito = await _apiService.borrarRecurso(widget.token, widget.recurso.id);
       
       if (exito && mounted) {
+         ScaffoldMessenger.of(context).showSnackBar(
+           const SnackBar(content: Text("Archivo movido a la papelera")),
+         );
         Navigator.pop(context); // Vuelve a la galería
+      } else if (mounted) {
+         ScaffoldMessenger.of(context).showSnackBar(
+           const SnackBar(content: Text("Error al eliminar el archivo"), backgroundColor: Colors.red),
+         );
       }
     }
   }
 
+  // --- LÓGICA DE RENOMBRADO SEGURA Y LIMITADA ---
   void _editarNombre() {
-    final controller = TextEditingController(text: _nombreActual);
+    // 1. Separar nombre y extensión
+    String extension = path.extension(_nombreActual); 
+    String nombreSinExt = path.basenameWithoutExtension(_nombreActual);
+
+    final controller = TextEditingController(text: nombreSinExt);
+    bool cargando = false;
+
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Cambiar nombre"),
-        content: TextField(controller: controller, autofocus: true),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancelar")),
-          TextButton(
-            onPressed: () async {
-              final nuevoNombre = controller.text.trim();
-              if (nuevoNombre.isNotEmpty && nuevoNombre != _nombreActual) {
-                Navigator.pop(ctx);
-                // bool ok = await _apiService.editarNombre(widget.token, widget.recurso.id, nuevoNombre);
-                bool ok = true; // Simulación
-                if (ok) setState(() => _nombreActual = nuevoNombre);
-              } else {
-                Navigator.pop(ctx);
-              }
-            },
-            child: const Text("Guardar"),
-          ),
-        ],
-      ),
+      barrierDismissible: false,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            return AlertDialog(
+              title: const Text("Cambiar nombre"),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text("Edita el nombre sin modificar la extensión.", style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  const SizedBox(height: 15),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: controller,
+                          autofocus: true,
+                          decoration: const InputDecoration(
+                            labelText: "Nombre",
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 0)
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 15),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[200],
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: Colors.grey),
+                        ),
+                        child: Text(
+                          extension,
+                          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey[700]),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (cargando) const Padding(padding: EdgeInsets.only(top: 20), child: LinearProgressIndicator()),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("Cancelar"),
+                ),
+                ElevatedButton(
+                  onPressed: cargando ? null : () async {
+                    String nuevoBase = controller.text.trim();
+                    if (nuevoBase.isEmpty) return;
+                    
+                    String nuevoNombreCompleto = "$nuevoBase$extension";
+                    
+                    if (nuevoNombreCompleto == _nombreActual) {
+                      Navigator.pop(context);
+                      return;
+                    }
+
+                    setStateDialog(() => cargando = true);
+
+                    // 1. INTENTO DE RENOMBRADO NORMAL
+                    int codigo = await _apiService.editarNombre(
+                        widget.token, 
+                        widget.recurso.id, 
+                        nuevoNombreCompleto, 
+                        reemplazar: false
+                    );
+
+                    setStateDialog(() => cargando = false);
+
+                    if (codigo == 200) {
+                      // ÉXITO
+                      Navigator.pop(context);
+                      setState(() => _nombreActual = nuevoNombreCompleto);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("Nombre actualizado")),
+                      );
+                    } 
+                    else if (codigo == 409) {
+                      // 2. CONFLICTO: PREGUNTAR AL USUARIO
+                      bool? reemplazar = await showDialog<bool>(
+                        context: context,
+                        builder: (subCtx) => AlertDialog(
+                          title: const Text("Nombre duplicado"),
+                          content: Text("Ya existe un archivo llamado '$nuevoNombreCompleto' en esta carpeta.\n\n¿Quieres reemplazarlo?"),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.pop(subCtx, false), child: const Text("Cancelar")),
+                            TextButton(onPressed: () => Navigator.pop(subCtx, true), child: const Text("Reemplazar", style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold))),
+                          ],
+                        ),
+                      );
+
+                      if (reemplazar == true) {
+                        setStateDialog(() => cargando = true);
+                        // 3. REINTENTO CON REEMPLAZO FORZADO
+                        int cod2 = await _apiService.editarNombre(
+                            widget.token, 
+                            widget.recurso.id, 
+                            nuevoNombreCompleto, 
+                            reemplazar: true
+                        );
+                        
+                        if (cod2 == 200) {
+                           Navigator.pop(context);
+                           setState(() => _nombreActual = nuevoNombreCompleto);
+                           ScaffoldMessenger.of(context).showSnackBar(
+                             const SnackBar(content: Text("Archivo reemplazado y renombrado")),
+                           );
+                        } else {
+                           Navigator.pop(context); // Cierra por seguridad
+                           ScaffoldMessenger.of(context).showSnackBar(
+                             const SnackBar(content: Text("Error al reemplazar el archivo")),
+                           );
+                        }
+                      }
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("Error desconocido al renombrar")),
+                      );
+                    }
+                  },
+                  child: const Text("Guardar"),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
@@ -294,9 +411,17 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
 
       if (hora != null) {
         final nuevaFechaReal = DateTime(fecha.year, fecha.month, fecha.day, hora.hour, hora.minute);
-        // bool ok = await _apiService.editarFecha(widget.token, widget.recurso.id, nuevaFechaReal);
-        bool ok = true; // Simulación
-        if (ok) setState(() => _fechaRealActual = nuevaFechaReal);
+        
+        // Llamada real al servicio
+        bool ok = await _apiService.editarFecha(widget.token, widget.recurso.id, nuevaFechaReal);
+        
+        if (ok) {
+           setState(() => _fechaRealActual = nuevaFechaReal);
+        } else {
+           ScaffoldMessenger.of(context).showSnackBar(
+             const SnackBar(content: Text("Error al actualizar la fecha")),
+           );
+        }
       }
     }
   }
@@ -310,7 +435,7 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
     super.dispose();
   }
 
-  // --- CONSTRUCCIÓN DE LA UI ---
+  // --- CONSTRUCCIÓN DE LA UI (IGUAL QUE ANTES) ---
 
   @override
   Widget build(BuildContext context) {
@@ -318,10 +443,8 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // 1. CONTENIDO CENTRAL (Imagen, Video, Audio)
           Center(child: _buildContenidoMultimedia()),
 
-          // 2. BOTÓN ATRÁS (Arriba izquierda)
           Positioned(
             top: 40,
             left: 10,
@@ -334,23 +457,21 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
             ),
           ),
 
-          // 3. PANEL DESLIZANTE DE INFORMACIÓN
           DraggableScrollableSheet(
-            initialChildSize: 0.15, // Altura inicial (un poco visible)
-            minChildSize: 0.1,      // Mínimo visible
-            maxChildSize: 0.6,      // Máximo extendido
+            initialChildSize: 0.15,
+            minChildSize: 0.1,
+            maxChildSize: 0.6,
             builder: (context, scrollController) {
               return Container(
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.95),
                   borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-                  boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 10, spreadRadius: 2)],
+                  boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 10, spreadRadius: 2)],
                 ),
                 child: ListView(
                   controller: scrollController,
                   padding: const EdgeInsets.all(20),
                   children: [
-                    // Barra superior pequeña para indicar que se desliza
                     Center(
                       child: Container(
                         width: 40,
@@ -363,7 +484,6 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
                     const Text("Detalles del Archivo", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 20),
 
-                    // Filas de Información
                     _buildEditableRow(Icons.title, "Nombre", _nombreActual, _editarNombre),
                     const Divider(),
                     _buildInfoRow(Icons.category, "Tipo", widget.recurso.tipo),
@@ -379,7 +499,6 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
 
                     const SizedBox(height: 30),
 
-                    // Botones de Acción
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
@@ -399,7 +518,7 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
     );
   }
 
-  // --- WIDGETS AUXILIARES ---
+  // --- WIDGETS AUXILIARES (IGUAL QUE ANTES) ---
 
   Widget _buildContenidoMultimedia() {
     final url = "${ApiService.baseUrl}${widget.recurso.urlVisualizacion}"; 

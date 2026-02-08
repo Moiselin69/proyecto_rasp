@@ -101,23 +101,30 @@ class ApiService {
       throw Exception('Error al cargar recursos');
     }
   }
-  Future<bool> subirRecurso(String token, File archivo, String tipo, {int? idAlbum}) async {
+
+  Future<bool> subirRecurso(String token, File archivo, String tipo, {int? idAlbum, bool reemplazar = false}) async {
     var uri = Uri.parse('$baseUrl/recurso/subir');
     var request = http.MultipartRequest('POST', uri);
-    
     request.headers['Authorization'] = 'Bearer $token';
     request.fields['tipo'] = tipo; 
-    
+    request.fields['reemplazar'] = reemplazar.toString(); // <--- NUEVO CAMPO
     if (idAlbum != null) {
       request.fields['id_album'] = idAlbum.toString();
     }
-    
     var fileStream = await http.MultipartFile.fromPath('file', archivo.path);
     request.files.add(fileStream);
-
     try {
       var response = await request.send();
-      return response.statusCode == 200;
+      if (response.statusCode == 200) {
+        return true;
+      } else if (response.statusCode == 409) {
+        print("Conflicto: El archivo ya existe y no se ordenó reemplazar");
+        return false;
+      } else {
+        final respStr = await response.stream.bytesToString();
+        print("Error subida (${response.statusCode}): $respStr");
+        return false;
+      }
     } catch (e) {
       print("Error subiendo archivo: $e");
       return false;
@@ -125,9 +132,8 @@ class ApiService {
   }
 
   // Función para editar nombre
-  Future<bool> editarNombre(String token, int idRecurso, String nuevoNombre) async {
+  Future<int> editarNombre(String token, int idRecurso, String nuevoNombre, {bool reemplazar = false}) async {
     final url = Uri.parse('$baseUrl/recurso/editar/nombre/$idRecurso');
-    
     try {
       final response = await http.put(
         url,
@@ -135,19 +141,17 @@ class ApiService {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
-        body: jsonEncode({"nombre": nuevoNombre}),
+        body: jsonEncode({
+          "nombre": nuevoNombre,
+          "reemplazar": reemplazar
+        }),
       );
-
-      if (response.statusCode == 200) {
-        return true;
-      } else {
-        // Si da 400, imprimimos por qué para verlo en consola
-        print("Error del servidor (${response.statusCode}): ${response.body}");
-        return false;
-      }
+      if (response.statusCode == 200) return 200; // Éxito
+      if (response.statusCode == 409) return 409; // Duplicado
+      return response.statusCode; // Otro error
     } catch (e) {
-      print("Error de conexión al editar nombre: $e");
-      return false;
+      print("Error conexión editar nombre: $e");
+      return 500;
     }
   }
 
@@ -478,6 +482,24 @@ class ApiService {
       headers: {'Authorization': 'Bearer $token'},
     );
     return response.statusCode == 200;
+  }
+
+  Future<bool> verificarDuplicado(String token, String nombreArchivo, int? idAlbum) async {
+    String query = "?nombre=$nombreArchivo";
+    if (idAlbum != null) {
+      query += "&id_album=$idAlbum";
+    }
+    
+    final response = await http.get(
+      Uri.parse('$baseUrl/recurso/verificar-duplicado$query'),
+      headers: {'Authorization': 'Bearer $token'},
+    );
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      return data['existe'] == true;
+    }
+    return false; // Si falla, asumimos false para intentar subir y que el backend decida
   }
 
 }

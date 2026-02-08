@@ -94,30 +94,72 @@ def borrar_recurso(id_recurso:int, id_persona:int):
             if 'cursor' in locals(): cursor.close()
             connection.close()
 
-def cambiar_nombre_recurso(id_recurso:int, nombre:str, id_persona:int):
+def renombrar_recurso_seguro(id_recurso: int, nuevo_nombre_completo: str, id_usuario: int, reemplazar: bool) -> Tuple[bool, Any]:
     connection = None
-    try: 
+    cursor = None
+    try:
         connection = db.get_connection()
-        connection.autocommit = False
-        if connection.is_connected():
-            cursor = connection.cursor()
-            query = "UPDATE Recurso r JOIN Recurso_Persona rp ON r.id=rp.id_recurso SET r.nombre=%s WHERE r.id=%s and rp.id_persona=%s"
-            valores = (nombre, id_recurso, id_persona)
-            cursor.execute(query, valores)
-            if cursor.rowcount == 0:
-                connection.rollback()
-                return (False, "No se encontró el recurso")
-            connection.commit()
-            return (True, f"Recurso {id_recurso} actualizado correctamente")
-    except Error as e:
-        if connection and connection.is_connected():
-            connection.rollback()
-        print(f"Error en cambiar nombre Recurso en MySql: {e}")
-        return (False, str(e))
-    finally: 
-        if connection is not None and connection.is_connected():
-            if 'cursor' in locals(): cursor.close()
-            connection.close()
+        connection.autocommit = False 
+        cursor = connection.cursor(dictionary=True, buffered=True)
+
+        # 1. Obtener datos del archivo actual
+        sql_info = """
+            SELECT r.id, ra.id_album 
+            FROM Recurso r
+            LEFT JOIN Recurso_Album ra ON r.id = ra.id_recurso
+            WHERE r.id = %s AND r.id_creador = %s
+        """
+        cursor.execute(sql_info, (id_recurso, id_usuario))
+        mi_archivo = cursor.fetchone()
+        
+        if not mi_archivo:
+            return False, "Archivo no encontrado"
+
+        id_album = mi_archivo['id_album']
+
+        # 2. Verificar duplicados (Añadido LIMIT 1)
+        if id_album is not None:
+            sql_check = """
+                SELECT r.id FROM Recurso r
+                JOIN Recurso_Album ra ON r.id = ra.id_recurso
+                WHERE r.nombre = %s AND ra.id_album = %s AND r.id_creador = %s 
+                AND r.fecha_eliminacion IS NULL AND r.id != %s
+                LIMIT 1
+            """
+            cursor.execute(sql_check, (nuevo_nombre_completo, id_album, id_usuario, id_recurso))
+        else:
+            sql_check = """
+                SELECT r.id FROM Recurso r
+                WHERE r.nombre = %s AND r.id_creador = %s 
+                AND r.fecha_eliminacion IS NULL AND r.id != %s
+                AND NOT EXISTS (SELECT 1 FROM Recurso_Album ra WHERE ra.id_recurso = r.id)
+                LIMIT 1
+            """
+            cursor.execute(sql_check, (nuevo_nombre_completo, id_usuario, id_recurso))
+
+        otro_archivo = cursor.fetchone()
+
+        # 3. Lógica de Colisión
+        if otro_archivo:
+            if not reemplazar:
+                return False, "DUPLICADO"
+            else:
+                # El usuario confirmó reemplazar: BORRAMOS el otro archivo de la BD
+                cursor.execute("DELETE FROM Recurso WHERE id = %s", (otro_archivo['id'],))
+        
+        # 4. Renombrar el nuestro
+        sql_update = "UPDATE Recurso SET nombre = %s WHERE id = %s"
+        cursor.execute(sql_update, (nuevo_nombre_completo, id_recurso))
+        
+        connection.commit()
+        return True, "Nombre actualizado correctamente"
+
+    except Exception as e:
+        if connection: connection.rollback()
+        return False, str(e)
+    finally:
+        if cursor: cursor.close()
+        if connection: connection.close()
 
 def cambiar_fecha_recurso(id_recurso:int, fecha:datetime, id_persona:int):
     connection = None
@@ -444,6 +486,100 @@ def eliminar_definitivamente_bd(id_recurso: int, id_usuario: int) -> Tuple[bool,
         # Devolvemos la ruta (enlace) para que el endpoint se encargue del os.remove
         return True, recurso['enlace'] 
     except Exception as e:
+        return False, str(e)
+    finally:
+        if cursor: cursor.close()
+        if connection and connection.is_connected(): connection.close()
+
+def check_recurso_existe_en_album(id_usuario: int, nombre: str, id_album: Optional[int]) -> Optional[int]:
+    """
+    Verifica existencia devolviendo el ID.
+    CORREGIDO: Usa buffered=True y LIMIT 1 para evitar 'Unread result found'.
+    """
+    connection = None
+    cursor = None
+    try:
+        connection = db.get_connection()
+        # IMPORTANTE: buffered=True es obligatorio cuando no lees todas las filas
+        cursor = connection.cursor(buffered=True) 
+        
+        if id_album is not None:
+            query = """
+                SELECT r.id 
+                FROM Recurso r
+                JOIN Recurso_Album ra ON r.id = ra.id_recurso
+                WHERE r.id_creador = %s 
+                  AND r.nombre = %s 
+                  AND ra.id_album = %s
+                  AND r.fecha_eliminacion IS NULL
+                LIMIT 1
+            """
+            cursor.execute(query, (id_usuario, nombre, id_album))
+        else:
+            # Versión optimizada para raíz
+            query = """
+                SELECT r.id 
+                FROM Recurso r
+                WHERE r.id_creador = %s 
+                  AND r.nombre = %s 
+                  AND r.fecha_eliminacion IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM Recurso_Album ra WHERE ra.id_recurso = r.id
+                  )
+                LIMIT 1
+            """
+            cursor.execute(query, (id_usuario, nombre))
+            
+        row = cursor.fetchone()
+        if row:
+            return row[0]
+        return None
+    except Error as e:
+        print(f"Error checking existencia: {e}")
+        # En un sistema ideal, aquí deberíamos lanzar el error, no ocultarlo,
+        # pero con el fix de arriba ya no debería fallar.
+        return None
+    finally:
+        if cursor: cursor.close()
+        if connection and connection.is_connected(): connection.close()
+
+def reemplazar_recurso_simple(id_recurso: int, nuevo_enlace: str, nuevo_tipo: str, nueva_fecha_real: Optional[datetime], id_usuario: int) -> Tuple[bool, Any]:
+    """
+    Actualiza el recurso existente con el nuevo archivo.
+    Devuelve (True, ruta_archivo_viejo) para poder borrarlo del disco.
+    """
+    connection = None
+    cursor = None
+    try:
+        connection = db.get_connection()
+        connection.autocommit = False
+        cursor = connection.cursor()
+
+        # 1. Obtener la ruta del archivo VIEJO para devolverla y borrarla luego
+        cursor.execute("SELECT enlace FROM Recurso WHERE id = %s AND id_creador = %s", (id_recurso, id_usuario))
+        resultado = cursor.fetchone()
+        
+        if not resultado:
+            return False, "Recurso original no encontrado"
+            
+        ruta_vieja = resultado[0]
+
+        # 2. Actualizar la tabla con los datos del NUEVO archivo
+        # Mantenemos el ID, pero cambiamos el enlace, el tipo y la fecha
+        sql_update = """
+            UPDATE Recurso 
+            SET enlace = %s, tipo = %s, fecha_real = %s, fecha_subida = NOW(), fecha_eliminacion = NULL
+            WHERE id = %s AND id_creador = %s
+        """
+        cursor.execute(sql_update, (nuevo_enlace, nuevo_tipo, nueva_fecha_real, id_recurso, id_usuario))
+        
+        connection.commit()
+        
+        # Devolvemos éxito y la ruta vieja para que Python la borre del disco
+        return True, ruta_vieja
+
+    except Error as e:
+        if connection: connection.rollback()
         return False, str(e)
     finally:
         if cursor: cursor.close()

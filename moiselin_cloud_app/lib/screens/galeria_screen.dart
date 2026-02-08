@@ -352,60 +352,158 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
     FilePickerResult? result = await FilePicker.platform.pickFiles(allowMultiple: false);
     if (result != null && result.files.single.path != null) {
       File file = File(result.files.single.path!);
+      String nombreArchivo = result.files.single.name; // El nombre original (ej: "vacaciones.jpg")
       String tipo = _obtenerTipoArchivo(file.path);
+      bool existe = await _apiService.verificarDuplicado(widget.token, nombreArchivo, widget.parentId);
+      bool reemplazar = false;
+      if (existe) {
+        bool? confirmacion = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text("Archivo duplicado"),
+            content: Text(
+              "Ya existe un archivo llamado '$nombreArchivo' en esta carpeta.\n\n"
+              "¿Deseas reemplazarlo? Se guardará una copia de la versión anterior en el historial."
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false), // CANCELAR
+                child: Text("Cancelar"),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+                onPressed: () => Navigator.pop(ctx, true), // CONFIRMAR
+                child: Text("Reemplazar", style: TextStyle(color: Colors.white)),
+              ),
+            ],
+          ),
+        );
+        if (confirmacion != true) {
+          return; 
+        }
+        reemplazar = true;
+      }
       setState(() => _cargando = true);
-      bool exito = await _apiService.subirRecurso(widget.token, file, tipo, idAlbum: widget.parentId);
+      bool exito = await _apiService.subirRecurso(widget.token, file, tipo, idAlbum: widget.parentId,reemplazar: reemplazar);
       if (exito) {
         bool borrar = await ApiService.getBorrarAlSubir();
-        String mensaje = "Archivo subido correctamente";
         if (borrar) {
           try {
-            if (await file.exists()) {
-              await file.delete(); // Borramos el archivo local
-              mensaje = "Subido y borrado del dispositivo para ahorrar espacio";
-            }
+            if (await file.exists()) await file.delete();
           } catch (e) {
-            print("No se pudo borrar el archivo local: $e");
+            print("No se pudo borrar local: $e");
           }
         }
         if (mounted) {
+          String mensaje = reemplazar 
+              ? "Archivo remplazado" 
+              : "Archivo subido correctamente";
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(mensaje)));
         }
-        _cargarDatos(); // Recargar la galería
+        _cargarDatos(); // Refrescamos la galería
       } else {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error al subir")));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Error al subir el archivo"))
+          );
         }
-        setState(() => _cargando = false);
       }
+      setState(() => _cargando = false);
     }
   }
 
   void _mostrarCrearAlbumDialog() {
-    final nombreCtrl = TextEditingController();
+    final TextEditingController _controller = TextEditingController();
+    
+    // --- CORRECCIÓN: Definimos las variables AQUÍ, fuera del StatefulBuilder ---
+    // De esta forma, no se reinician cada vez que se actualiza el diálogo.
+    String? _errorTexto; 
+    bool _botonDesactivado = true; 
+
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text("Nueva Carpeta"),
-        content: TextField(
-          controller: nombreCtrl,
-          decoration: InputDecoration(hintText: "Nombre de la carpeta"),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text("Cancelar")),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(ctx);
-              setState(() => _cargando = true);
-              bool ok = await _apiService.crearAlbum(widget.token, nombreCtrl.text, "", widget.parentId);
-              if (ok) _cargarDatos();
-              else setState(() => _cargando = false);
-            },
-            child: Text("Crear"),
-          )
-        ],
-      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            
+            // Función interna para validar mientras escribes
+            void _validarNombre(String texto) {
+              final nombreLimpio = texto.trim();
+              
+              if (nombreLimpio.isEmpty) {
+                setStateDialog(() {
+                  _errorTexto = null;
+                  _botonDesactivado = true;
+                });
+                return;
+              }
+
+              // Buscamos si ya existe una carpeta con ese nombre
+              bool existe = _albumesVisibles.any((album) => 
+                  album.nombre.toLowerCase() == nombreLimpio.toLowerCase()
+              );
+
+              setStateDialog(() {
+                if (existe) {
+                  _errorTexto = "Ya existe una carpeta con este nombre";
+                  _botonDesactivado = true;
+                } else {
+                  _errorTexto = null;
+                  _botonDesactivado = false;
+                }
+              });
+            }
+
+            return AlertDialog(
+              title: const Text('Nueva Carpeta'),
+              content: TextField(
+                controller: _controller,
+                autofocus: true,
+                decoration: InputDecoration(
+                  hintText: "Nombre de la carpeta",
+                  errorText: _errorTexto, 
+                ),
+                onChanged: (val) => _validarNombre(val),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancelar'),
+                ),
+                ElevatedButton(
+                  // Si _botonDesactivado es true, onPressed es null (botón gris)
+                  onPressed: _botonDesactivado 
+                      ? null 
+                      : () {
+                          Navigator.pop(context);
+                          _realizarCreacionAlbum(_controller.text.trim());
+                        },
+                  child: const Text('Crear'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
+  }
+
+  void _realizarCreacionAlbum(String nombre) async {
+    setState(() => _cargando = true);
+    // Llamada a la API (pasamos descripción vacía "" como tenías antes)
+    bool ok = await _apiService.crearAlbum(widget.token, nombre, "", widget.parentId);
+    
+    if (ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Carpeta creada'), backgroundColor: Colors.green),
+      );
+      _cargarDatos(); // Recargamos para que aparezca
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Error al crear la carpeta'), backgroundColor: Colors.red),
+      );
+      setState(() => _cargando = false);
+    }
   }
 
   void _aplicarFiltro(String categoria) {
