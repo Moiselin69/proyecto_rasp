@@ -231,24 +231,34 @@ def compartir_recurso_bd(id_recurso, id_emisor, id_receptor):
         conexion.close()    
 
 def obtener_peticiones_recurso_pendientes(id_receptor):
-    conexion = db.get_connection()
+    connection = None
+    cursor = None
     try:
-        with conexion.cursor(dictionary=True) as cursor:
-            # PR.id_persona es el Emisor, PR.id_persona_compartida es el Receptor (Tú)
-            sql = """
-                SELECT R.nombre as nombre_recurso, R.tipo, P.nombre as nombre_emisor, P.apellidos as apellidos_emisor, 
-                       PR.id_recurso, PR.id_persona as id_emisor, PR.fecha_solicitud
-                FROM Peticion_Recurso PR
-                JOIN Recurso R ON PR.id_recurso = R.id
-                JOIN Persona P ON PR.id_persona = P.id
-                WHERE PR.id_persona_compartida = %s AND PR.estado = 'PENDIENTE'
-            """
-            cursor.execute(sql, (id_receptor,))
-            return True, cursor.fetchall()
+        connection = db.get_connection()
+        # Usamos buffered=True para evitar conflictos con otras consultas
+        cursor = connection.cursor(dictionary=True, buffered=True)
+        sql = """
+            SELECT R.nombre as nombre_recurso, R.tipo, P.nombre as nombre_emisor, P.apellidos as apellidos_emisor, 
+                   PR.id_recurso, PR.id_persona as id_emisor, PR.fecha_solicitud
+            FROM Peticion_Recurso PR
+            JOIN Recurso R ON PR.id_recurso = R.id
+            JOIN Persona P ON PR.id_persona = P.id
+            WHERE PR.id_persona_compartida = %s AND PR.estado = 'PENDIENTE'
+        """
+        cursor.execute(sql, (id_receptor,))
+        resultados = cursor.fetchall()
+        # Convertimos fecha_solicitud a string si es datetime, para evitar errores de serialización JSON
+        for row in resultados:
+            if row.get('fecha_solicitud'):
+                row['fecha_solicitud'] = str(row['fecha_solicitud'])
+        return True, resultados
+        
     except Exception as e:
+        print(f"Error obteniendo peticiones: {e}")
         return False, str(e)
     finally:
-        if conexion: conexion.close()
+        if cursor: cursor.close()
+        if connection and connection.is_connected(): connection.close()
 
 def responder_peticion_recurso(id_emisor, id_receptor, id_recurso, aceptar):
     """Acepta o rechaza una solicitud de recurso."""
