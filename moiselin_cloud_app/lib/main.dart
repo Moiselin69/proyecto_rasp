@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'screens/login_screen.dart';
 import 'screens/galeria_screen.dart';
 import 'services/api_service.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 // 2. CLASE PARA IGNORAR ERRORES DE CERTIFICADO (Solo para desarrollo)
 class MyHttpOverrides extends HttpOverrides {
@@ -26,6 +27,14 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Moiselin Cloud',
       debugShowCheckedModeBanner: false,
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('es', 'ES'),
+      ],
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
