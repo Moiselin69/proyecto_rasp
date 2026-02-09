@@ -46,7 +46,8 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _filtroOrden = "subida_desc";
   String _mensajeSubida = "Subiendo...";
-  
+  DateTimeRange? _rangoFechas;
+  String _tipoFechaFiltro = 'real';
   // --- NUEVA LÓGICA DE SELECCIÓN MIXTA ---
   bool _modoSeleccion = false;
   Set<int> _recursosSeleccionados = {};
@@ -91,10 +92,13 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
   }
 
   void _aplicarFiltros() {
-    // 1. Empezamos con la lista completa (copia)
-    List<Recurso> listaRecursos = List.from(_todosLosRecursos); // Asegúrate de tener _todosLosRecursos llena con los datos de la API
+    // 1. Empezamos con la lista completa (copias para no modificar las originales)
+    List<Recurso> listaRecursos = List.from(_todosLosRecursos);
     List<Album> listaAlbumes = List.from(_albumesVisibles);
-    // 2. Filtro de Texto (Buscador)
+
+    // ---------------------------------------------------------
+    // 2. FILTRO DE TEXTO (BUSCADOR)
+    // ---------------------------------------------------------
     String texto = _searchController.text.toLowerCase();
     if (texto.isNotEmpty) {
       listaRecursos = listaRecursos.where((r) => 
@@ -104,12 +108,72 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
         a.nombre.toLowerCase().contains(texto)
       ).toList();
     }
+
+    // ---------------------------------------------------------
+    // 3. FILTRO DE FECHAS (NUEVO)
+    // ---------------------------------------------------------
+    if (_rangoFechas != null) {
+      // Normalizamos las fechas del rango para cubrir el día completo
+      // Inicio: 00:00:00 | Fin: 23:59:59
+      DateTime inicio = DateUtils.dateOnly(_rangoFechas!.start);
+      DateTime fin = DateUtils.dateOnly(_rangoFechas!.end).add(const Duration(days: 1)).subtract(const Duration(milliseconds: 1));
+
+      listaRecursos = listaRecursos.where((r) {
+        DateTime? fechaEvaluar;
+
+        // Elegimos qué fecha usar según el chip seleccionado
+        if (_tipoFechaFiltro == 'real') {
+          fechaEvaluar = r.fechaReal;
+        } else {
+          fechaEvaluar = r.fechaSubida;
+        }
+
+        // Si el archivo no tiene esa fecha, decidimos si mostrarlo u ocultarlo.
+        // Por lo general, se oculta si no cumple el criterio.
+        if (fechaEvaluar == null) return false;
+
+        return fechaEvaluar.isAfter(inicio.subtract(const Duration(seconds: 1))) && 
+               fechaEvaluar.isBefore(fin.add(const Duration(seconds: 1)));
+      }).toList();
+
+      // (Opcional) Filtramos también álbumes por su fecha de creación para ser consistentes
+      listaAlbumes = listaAlbumes.where((a) {
+        return a.fechaCreacion.isAfter(inicio.subtract(const Duration(seconds: 1))) && 
+               a.fechaCreacion.isBefore(fin.add(const Duration(seconds: 1)));
+      }).toList();
+    }
+
+    // ---------------------------------------------------------
+    // 4. FILTRO DE CATEGORÍA (IMAGEN, VIDEO...)
+    // ---------------------------------------------------------
+    if (_filtroSeleccionado != "Todos") {
+      switch (_filtroSeleccionado) {
+        case "Imagen":
+          listaRecursos = listaRecursos.where((r) => r.tipo == "IMAGEN").toList();
+          break;
+        case "Videos":
+          listaRecursos = listaRecursos.where((r) => r.tipo == "VIDEO").toList();
+          break;
+        case "Musica":
+          listaRecursos = listaRecursos.where((r) => r.tipo == "AUDIO").toList();
+          break;
+        case "Otros":
+          listaRecursos = listaRecursos.where((r) => !["IMAGEN", "VIDEO", "AUDIO"].contains(r.tipo)).toList();
+          break;
+      }
+    }
+
+    // ---------------------------------------------------------
+    // 5. ORDENACIÓN
+    // ---------------------------------------------------------
+    
+    // Función auxiliar para ordenar álbumes
     int compararAlbumes(Album a, Album b, bool asc) {
        return asc 
          ? a.fechaCreacion.compareTo(b.fechaCreacion)
          : b.fechaCreacion.compareTo(a.fechaCreacion);
     }
-    // 3. Ordenación
+
     switch (_filtroOrden) {
       case 'subida_desc': // Reciente primero
         listaRecursos.sort((a, b) => b.fechaSubida.compareTo(a.fechaSubida));
@@ -122,7 +186,7 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
         break;
       
       case 'real_desc': 
-        // En carpetas "fecha real" lo tratamos como "creación"
+        // Para ordenar, si fechaReal es null, usamos una fecha muy antigua para que se vaya al final
         listaRecursos.sort((a, b) => (b.fechaReal ?? DateTime(1900)).compareTo(a.fechaReal ?? DateTime(1900)));
         listaAlbumes.sort((a, b) => compararAlbumes(a, b, false));
         break;
@@ -138,11 +202,102 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
         break;
     }
 
-    // 4. Actualizamos la vista
+    // ---------------------------------------------------------
+    // 6. ACTUALIZAR VISTA
+    // ---------------------------------------------------------
     setState(() {
       _recursosFiltrados = listaRecursos;
       _albumesFiltrados = listaAlbumes;
     });
+  }
+
+  void _mostrarSelectorFechas() {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              padding: const EdgeInsets.all(20),
+              height: 250,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text("Filtrar por fecha", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 15),
+                  
+                  // Selector de Tipo: Real vs Subida
+                  Row(
+                    children: [
+                      ChoiceChip(
+                        label: const Text("Fecha Captura (Real)"),
+                        selected: _tipoFechaFiltro == 'real',
+                        onSelected: (val) => setModalState(() => _tipoFechaFiltro = 'real'),
+                      ),
+                      const SizedBox(width: 10),
+                      ChoiceChip(
+                        label: const Text("Fecha Subida"),
+                        selected: _tipoFechaFiltro == 'subida',
+                        onSelected: (val) => setModalState(() => _tipoFechaFiltro = 'subida'),
+                      ),
+                    ],
+                  ),
+                  
+                  const SizedBox(height: 20),
+                  
+                  // Botón para abrir el Calendario
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.date_range),
+                      label: Text(_rangoFechas == null 
+                          ? "Seleccionar Rango" 
+                          : "${_rangoFechas!.start.day}/${_rangoFechas!.start.month} - ${_rangoFechas!.end.day}/${_rangoFechas!.end.month}"),
+                      onPressed: () async {
+                        final picked = await showDateRangePicker(
+                          context: context,
+                          firstDate: DateTime(2000),
+                          lastDate: DateTime.now().add(const Duration(days: 1)), // Hasta mañana por si acaso
+                          initialDateRange: _rangoFechas,
+                          locale: const Locale('es', 'ES'), // Si tienes configurado localizations
+                        );
+                        
+                        if (picked != null) {
+                          // Actualizamos el estado GLOBAL de la pantalla, no solo del modal
+                          setState(() {
+                            _rangoFechas = picked;
+                          });
+                          // Actualizamos el modal para que se vea el cambio de texto en el botón
+                          setModalState(() {});
+                          
+                          Navigator.pop(context); // Cerramos el modal
+                          _aplicarFiltros(); // Aplicamos filtro
+                        }
+                      },
+                    ),
+                  ),
+                  
+                  // Botón para Limpiar
+                  if (_rangoFechas != null)
+                    Center(
+                      child: TextButton(
+                        onPressed: () {
+                          setState(() {
+                            _rangoFechas = null;
+                          });
+                          Navigator.pop(context);
+                          _aplicarFiltros();
+                        },
+                        child: const Text("Borrar filtro de fecha", style: TextStyle(color: Colors.red)),
+                      ),
+                    )
+                ],
+              ),
+            );
+          }
+        );
+      }
+    );
   }
 
   void _mostrarMenuOrden() {
@@ -847,6 +1002,11 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                   onPressed: () => setState(() => _buscando = true)
                 ),
                 IconButton(
+                  // Si hay fechas seleccionadas, lo pintamos de azul para que se note
+                  icon: Icon(Icons.calendar_month, color: _rangoFechas != null ? Colors.blue : Colors.black),
+                  onPressed: _mostrarSelectorFechas, // <--- AQUÍ SE LLAMA A LA FUNCIÓN
+                ),
+                IconButton(
                   icon: Icon(Icons.sort), 
                   onPressed: _mostrarMenuOrden
                 ),
@@ -862,34 +1022,67 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
             children: [
               // Filtros
               Container(
-                height: 60,
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  itemCount: _categorias.length,
-                  itemBuilder: (context, index) {
-                    final cat = _categorias[index];
-                    final isSelected = _filtroSeleccionado == cat;
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8.0),
-                      child: FilterChip(
-                        label: Text(cat),
-                        selected: isSelected,
-                        onSelected: (bool selected) { if (selected) _aplicarFiltro(cat); },
-                        backgroundColor: Colors.grey[100],
-                        selectedColor: Colors.blue[100],
-                        labelStyle: TextStyle(
-                          color: isSelected ? Colors.blue[900] : Colors.black87,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                        ),
-                        checkmarkColor: Colors.blue[900],
-                        shape: const StadiumBorder(side: BorderSide(color: Colors.transparent)),
-                      ),
-                    );
-                  },
-                ),
+            height: 60,
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              itemCount: _categorias.length,
+              itemBuilder: (context, index) {
+                final cat = _categorias[index];
+                final isSelected = _filtroSeleccionado == cat;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8.0),
+                  child: FilterChip(
+                    label: Text(cat),
+                    selected: isSelected,
+                    onSelected: (bool selected) { if (selected) _aplicarFiltro(cat); },
+                    backgroundColor: Colors.grey[100],
+                    selectedColor: Colors.blue[100],
+                    labelStyle: TextStyle(
+                      color: isSelected ? Colors.blue[900] : Colors.black87,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    ),
+                    checkmarkColor: Colors.blue[900],
+                    shape: const StadiumBorder(side: BorderSide(color: Colors.transparent)),
+                  ),
+                );
+              },
+            ),
+          ),
+
+          // 2. AÑADE ESTO AQUÍ: EL INDICADOR DE FECHA ACTIVA
+          if (_rangoFechas != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+              child: Row(
+                children: [
+                  InputChip(
+                    avatar: const Icon(Icons.calendar_today, size: 16, color: Colors.blue),
+                    label: Text(
+                      // Muestra si es fecha Real o Subida y el rango (ej: "Captura: 10/2 - 15/2")
+                      "${_tipoFechaFiltro == 'real' ? 'Captura' : 'Subida'}: "
+                      "${_rangoFechas!.start.day}/${_rangoFechas!.start.month} - "
+                      "${_rangoFechas!.end.day}/${_rangoFechas!.end.month}",
+                      style: TextStyle(color: Colors.blue[900], fontSize: 13),
+                    ),
+                    onDeleted: () {
+                      // Al pulsar la X, borramos el filtro
+                      setState(() {
+                        _rangoFechas = null;
+                        _aplicarFiltros(); // Recargamos la lista
+                      });
+                    },
+                    deleteIconColor: Colors.red,
+                    backgroundColor: Colors.blue[50],
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      side: BorderSide(color: Colors.blue.withOpacity(0.3))
+                    ),
+                  ),
+                ],
               ),
+            ),
 
               // Grid
               Expanded(
