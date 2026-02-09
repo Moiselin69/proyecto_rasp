@@ -159,6 +159,20 @@ CREATE TABLE EnlacePublico_Contenido (
     FOREIGN KEY (id_album) REFERENCES Album(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+CREATE TABLE Metadatos (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    id_recurso INT NOT NULL,
+    dispositivo VARCHAR(100) NULL, -- Ej: iPhone 13
+    iso INT NULL,
+    apertura VARCHAR(20) NULL, -- Ej: f/1.8
+    velocidad VARCHAR(20) NULL, -- Ej: 1/60
+    latitud DECIMAL(10, 8) NULL,
+    longitud DECIMAL(11, 8) NULL,
+    ancho INT NULL,
+    alto INT NULL,
+    FOREIGN KEY (id_recurso) REFERENCES Recurso(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
 DELIMITER //
 
 CREATE TRIGGER crear_relacion_autor

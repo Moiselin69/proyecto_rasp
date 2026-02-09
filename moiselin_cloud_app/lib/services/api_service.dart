@@ -6,6 +6,7 @@ import 'dart:io';
 import "../models/album.dart";
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path/path.dart' as path;
+import '../models/metadatos.dart';
 
 class ApiService {
   static String baseUrl = "http://192.168.1.6:8000";
@@ -686,6 +687,27 @@ class ApiService {
       }
       return null;
     } catch (e) {
+      return null;
+    }
+  }
+
+  Future<MetadatosFoto?> obtenerMetadatos(String token, int idRecurso) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/recurso/metadatos/$idRecurso'),
+        headers: {'Authorization': 'Bearer $token'}
+      );
+      
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        // Si el JSON está vacío (no tiene metadatos), devolvemos null
+        if (data == null || (data is Map && data.isEmpty)) return null;
+        
+        return MetadatosFoto.fromJson(data);
+      }
+      return null;
+    } catch (e) {
+      print("Error obteniendo metadatos: $e");
       return null;
     }
   }

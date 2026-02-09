@@ -11,6 +11,7 @@ import funcionesSeguridad
 import modeloDatos
 import cv2
 import utilidadesFicheros
+import utilidadesMetadatos
 router = APIRouter()
 
 #~Endpoint para subir recursos
@@ -46,6 +47,9 @@ async def subir_archivo(tipo: str = Form(...), fecha: Optional[datetime] = Form(
     except Exception as e:
         if os.path.exists(ruta_completa_original): os.remove(ruta_completa_original)
         raise HTTPException(status_code=500, detail=f"Error verificando cuota: {str(e)}")
+    metadatos_extraidos = None
+    if tipo == "IMAGEN":
+        metadatos_extraidos = utilidadesMetadatos.obtener_exif(ruta_completa_original)
     try: # 4. Generar Miniaturas (Solo si pasó la prueba de espacio)
         if tipo == "IMAGEN":
             ruta_completa_miniatura = os.path.join(carpeta_miniatura, nombre_archivo_fisico)
@@ -82,12 +86,18 @@ async def subir_archivo(tipo: str = Form(...), fecha: Optional[datetime] = Form(
              if os.path.exists(resultado): 
                  try: os.remove(resultado) 
                  except: pass
+        if exito:
+            if metadatos_extraidos:
+                consultasRecursos.guardar_metadatos(id_recurso, metadatos_extraidos)
         return {"mensaje": "Archivo reemplazado correctamente", "id_recurso": id_existente}
     else: # CASO B: 
         exito, id_recurso = consultasRecursos.subir_recurso(current_user_id, tipo, enlace_db, file.filename, tamano_archivo,fecha, id_album_int)
         if not exito:
             if os.path.exists(ruta_completa_original): os.remove(ruta_completa_original)
             raise HTTPException(status_code=500, detail=str(id_recurso))
+        if exito:
+            if metadatos_extraidos:
+                consultasRecursos.guardar_metadatos(id_recurso, metadatos_extraidos)
         return {"mensaje": "Archivo subido correctamente", "id_recurso": id_recurso}
 
 #~Endpoint para comprobar que una carpeta no hay dos recursos que se llamen exactamente igual
@@ -317,3 +327,15 @@ def lote_mover(
     exito, msg = consultasRecursos.mover_recursos_lote(lote.ids, lote.id_album_destino, current_user_id)
     if not exito: raise HTTPException(status_code=400, detail=msg)
     return {"mensaje": msg}
+
+@router.get("/recurso/metadatos/{id_recurso}")
+def get_metadatos(id_recurso: int, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+    # Primero verificamos que el usuario tenga permiso de ver el recurso
+    permiso, _ = consultasRecursos.obtener_recurso_por_id(id_recurso, current_user_id)
+    if not permiso:
+        raise HTTPException(status_code=403, detail="No tienes acceso")
+    
+    meta = consultasRecursos.obtener_metadatos(id_recurso)
+    if not meta:
+        return {} # Devuelve vacío si no tiene EXIF
+    return meta

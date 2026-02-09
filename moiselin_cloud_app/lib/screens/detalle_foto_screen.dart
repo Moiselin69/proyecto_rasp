@@ -11,6 +11,9 @@ import 'package:path/path.dart' as path; // Importante para separar extensión
 import '../models/recursos.dart';
 import '../services/api_service.dart';
 import '../services/download_service.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+import '../models/metadatos.dart';
 
 class DetalleRecursoScreen extends StatefulWidget {
   final Recurso recurso;
@@ -38,13 +41,109 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
   Duration _duration = Duration.zero;
   Duration _position = Duration.zero;
   Future<String>? _futureTexto;
+  MetadatosFoto? _meta;
 
   @override
   void initState() {
     super.initState();
     _nombreActual = widget.recurso.nombre;
     _fechaRealActual = widget.recurso.fechaReal;
+    _cargarMetadatos();
     _inicializarRecurso();
+  }
+
+  Widget _buildInfoExif() {
+    if (_meta == null) return const SizedBox.shrink();
+
+    return Column(
+      children: [
+        const SizedBox(height: 10),
+        const Divider(),
+        const Text("Datos EXIF", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+        const SizedBox(height: 10),
+
+        // Fila de Datos Técnicos (ISO, Apertura, etc.)
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          children: [
+            if (_meta!.iso != null) _datoChip(Icons.iso, "ISO ${_meta!.iso}"),
+            if (_meta!.apertura != null) _datoChip(Icons.camera, "${_meta!.apertura}"),
+            if (_meta!.velocidad != null) _datoChip(Icons.shutter_speed, "${_meta!.velocidad}"),
+          ],
+        ),
+        
+        const SizedBox(height: 10),
+
+        if (_meta!.dispositivo != null)
+          ListTile(
+            leading: const Icon(Icons.phone_iphone),
+            title: Text(_meta!.dispositivo!),
+            subtitle: const Text("Dispositivo"),
+            dense: true,
+          ),
+
+        // MAPA (Solo si hay GPS)
+        if (_meta!.latitud != null && _meta!.longitud != null)
+          Container(
+            height: 200,
+            width: double.infinity,
+            margin: const EdgeInsets.symmetric(vertical: 10),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(15),
+              border: Border.all(color: Colors.grey.shade300)
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(15),
+              child: FlutterMap(
+                options: MapOptions(
+                  initialCenter: LatLng(_meta!.latitud!, _meta!.longitud!),
+                  initialZoom: 15.0,
+                ),
+                children: [
+                  TileLayer(
+                    urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    userAgentPackageName: 'com.tuapp.moiselin',
+                  ),
+                  MarkerLayer(
+                    markers: [
+                      Marker(
+                        point: LatLng(_meta!.latitud!, _meta!.longitud!),
+                        width: 80,
+                        height: 80,
+                        child: const Icon(Icons.location_on, color: Colors.red, size: 40),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _datoChip(IconData icon, String texto) {
+    return Chip(
+      avatar: Icon(icon, size: 16, color: Colors.white),
+      label: Text(texto, style: const TextStyle(color: Colors.white, fontSize: 12)),
+      backgroundColor: Colors.black54,
+      padding: const EdgeInsets.all(0),
+    );
+  }
+
+  void _cargarMetadatos() async {
+    // 1. Optimización: Si no es una imagen, no perdemos tiempo buscando EXIF
+    if (widget.recurso.tipo != "IMAGEN") return;
+
+    // 2. Llamada a la API
+    final datos = await _apiService.obtenerMetadatos(widget.token, widget.recurso.id);
+    
+    // 3. Actualizar la interfaz
+    if (mounted) {
+      setState(() {
+        _meta = datos;
+      });
+    }
   }
 
   void _inicializarRecurso() {
@@ -496,7 +595,7 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
                       _fechaRealActual != null ? DateFormat('dd/MM/yyyy HH:mm').format(_fechaRealActual!) : "Sin asignar", 
                       _editarFechaReal
                     ),
-
+                    _buildInfoExif(),
                     const SizedBox(height: 30),
 
                     Row(

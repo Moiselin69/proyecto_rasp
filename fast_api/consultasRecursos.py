@@ -784,3 +784,42 @@ def mover_recursos_lote(ids: List[int], id_album_destino: Optional[int], id_usua
         return False, str(e)
     finally:
         if connection: connection.close()
+
+def guardar_metadatos(id_recurso, meta):
+    connection = None
+    try:
+        connection = db.get_connection()
+        cursor = connection.cursor()
+        sql = """
+            INSERT INTO Metadatos (id_recurso, dispositivo, iso, apertura, velocidad, latitud, longitud, ancho, alto)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        cursor.execute(sql, (
+            id_recurso, 
+            meta["dispositivo"], 
+            meta["iso"], 
+            meta["apertura"], 
+            meta["velocidad"], 
+            meta["latitud"], 
+            meta["longitud"],
+            meta["ancho"],
+            meta["alto"]
+        ))
+        connection.commit()
+    except Exception as e:
+        print(f"Error guardando metadatos: {e}")
+    finally:
+        if connection: connection.close()
+
+def obtener_metadatos(id_recurso):
+    """Recupera los metadatos para enviarlos al frontend"""
+    connection = None
+    try:
+        connection = db.get_connection()
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM Metadatos WHERE id_recurso = %s", (id_recurso,))
+        return cursor.fetchone()
+    except Exception:
+        return None
+    finally:
+        if connection: connection.close()

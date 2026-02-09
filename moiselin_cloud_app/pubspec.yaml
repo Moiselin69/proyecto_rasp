@@ -22,7 +22,8 @@ dependencies:
   path_provider: ^2.0.0
   gallery_saver_plus: ^3.0.0
   permission_handler: ^11.3.1
-  
+  flutter_map: ^6.0.0
+  latlong2: ^0.9.0
   intl: ^0.20.2 
   flutter_localizations:
     sdk: flutter
