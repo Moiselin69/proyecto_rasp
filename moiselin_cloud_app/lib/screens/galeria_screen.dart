@@ -14,6 +14,7 @@ import 'configuracion_screen.dart';
 import 'compartidos_screen.dart';
 import 'papelera_screen.dart';
 import 'admin_screen.dart';
+import 'package:flutter/services.dart';
 
 class GaleriaScreen extends StatefulWidget {
   final String token;
@@ -823,6 +824,115 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
     );
   }
 
+  void _mostrarDialogoCompartir(List<int> idsRecursos, List<int> idsAlbumes) { 
+    // Variables temporales para el diálogo
+    bool usarPassword = false;
+    String password = "";
+    int expiracion = 0; 
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text("Crear enlace público"),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Cambiamos el texto para que tenga sentido en plural
+                  Text("Se compartirán ${idsRecursos.length + idsAlbumes.length} elementos."),
+                  const SizedBox(height: 15),
+                  
+                  CheckboxListTile(
+                    title: const Text("Proteger con contraseña"),
+                    value: usarPassword,
+                    onChanged: (val) => setDialogState(() => usarPassword = val!),
+                  ),
+                  
+                  if (usarPassword)
+                    TextField(
+                      decoration: const InputDecoration(labelText: "Contraseña", border: OutlineInputBorder()),
+                      onChanged: (val) => password = val,
+                    ),
+                    
+                  const SizedBox(height: 10),
+                  
+                  DropdownButtonFormField<int>(
+                    value: expiracion,
+                    decoration: const InputDecoration(labelText: "Caducidad"),
+                    items: const [
+                      DropdownMenuItem(value: 0, child: Text("Nunca")),
+                      DropdownMenuItem(value: 1, child: Text("1 Día")),
+                      DropdownMenuItem(value: 7, child: Text("1 Semana")),
+                      DropdownMenuItem(value: 30, child: Text("1 Mes")),
+                    ],
+                    onChanged: (val) => setDialogState(() => expiracion = val!),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancelar")),
+              ElevatedButton(
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  
+                  // AHORA SÍ FUNCIONA: Pasamos las listas que recibimos por parámetro
+                  String? url = await _apiService.crearEnlacePublico(
+                    widget.token, 
+                    idsRecursos, // <--- LISTA
+                    idsAlbumes,  // <--- LISTA
+                    usarPassword && password.isNotEmpty ? password : null, 
+                    expiracion
+                  );
+
+                  if (url != null && mounted) {
+                    _mostrarDialogoUrl(url);
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error creando enlace")));
+                  }
+                },
+                child: const Text("Generar Enlace"),
+              ),
+            ],
+          );
+        }
+      ),
+    );
+  }
+
+  void _mostrarDialogoUrl(String url) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("¡Enlace listo!"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.check_circle, color: Colors.green, size: 50),
+            const SizedBox(height: 10),
+            SelectableText(url, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            const SizedBox(height: 5),
+            const Text("Copia este enlace y envíalo.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
+          ],
+        ),
+        actions: [
+          ElevatedButton.icon(
+            icon: const Icon(Icons.copy),
+            label: const Text("Copiar"),
+            onPressed: () {
+              
+              Clipboard.setData(ClipboardData(text: url));
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Enlace copiado")));
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _getIconoArchivo(Recurso recurso) {
     IconData icono;
     Color color;
@@ -989,28 +1099,45 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
         // --- ACCIONES DERECHA (Solo búsqueda y orden) ---
         actions: _modoSeleccion 
           ? [
+              IconButton(
+                icon: const Icon(Icons.share), 
+                onPressed: () {
+                  if (_recursosSeleccionados.isNotEmpty) {
+                    final recursoID = _recursosSeleccionados.first;
+                    _todosLosRecursos.firstWhere((e) => e.id == recursoID);
+                    _mostrarDialogoCompartir(_recursosSeleccionados.toList(), _albumesSeleccionados.toList()
+                  );
+                  } else {
+                    final albumID = _albumesSeleccionados.first;
+                    _albumesVisibles.firstWhere((e) => e.id == albumID);
+                    _mostrarDialogoCompartir(_recursosSeleccionados.toList(), _albumesSeleccionados.toList()
+                  );
+                  }
+                }
+              ),
+              // -------------------------------
+
               if (_recursosSeleccionados.isNotEmpty)
-                IconButton(icon: Icon(Icons.download), onPressed: _accionDescargarSeleccion),
-              IconButton(icon: Icon(Icons.drive_file_move), onPressed: _accionMover),
-              IconButton(icon: Icon(Icons.delete), onPressed: _accionBorrar),
+                IconButton(icon: const Icon(Icons.download), onPressed: _accionDescargarSeleccion),
+              IconButton(icon: const Icon(Icons.drive_file_move), onPressed: _accionMover),
+              IconButton(icon: const Icon(Icons.delete), onPressed: _accionBorrar),
             ]
           : [
-              // Si no estamos buscando, mostramos la lupa y el orden
+              // Si no estamos buscando, mostramos la lupa, calendario y el orden
               if (!_buscando) ...[
                 IconButton(
-                  icon: Icon(Icons.search), 
+                  icon: const Icon(Icons.search), 
                   onPressed: () => setState(() => _buscando = true)
                 ),
                 IconButton(
-                  // Si hay fechas seleccionadas, lo pintamos de azul para que se note
+                  // Si hay fechas seleccionadas, lo pintamos de azul
                   icon: Icon(Icons.calendar_month, color: _rangoFechas != null ? Colors.blue : Colors.black),
-                  onPressed: _mostrarSelectorFechas, // <--- AQUÍ SE LLAMA A LA FUNCIÓN
+                  onPressed: _mostrarSelectorFechas,
                 ),
                 IconButton(
-                  icon: Icon(Icons.sort), 
+                  icon: const Icon(Icons.sort), 
                   onPressed: _mostrarMenuOrden
                 ),
-                // Aquí ya NO ponemos los botones de config/logout porque están en el título
               ]
             ],
       ),

@@ -134,6 +134,31 @@ CREATE TABLE Recurso_Compartido (
     CONSTRAINT fk_recurso_compartido_receptor FOREIGN KEY (id_receptor) REFERENCES Persona(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+CREATE TABLE EnlacePublico (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    token VARCHAR(64) UNIQUE NOT NULL,
+    id_recurso INT NULL,
+    id_album INT NULL,
+    id_creador INT NOT NULL,
+    fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP,
+    fecha_expiracion DATETIME NULL,
+    password_hash VARCHAR(255) NULL,
+    veces_usado INT DEFAULT 0,
+    FOREIGN KEY (id_recurso) REFERENCES Recurso(id) ON DELETE CASCADE,
+    FOREIGN KEY (id_album) REFERENCES Album(id) ON DELETE CASCADE,
+    FOREIGN KEY (id_creador) REFERENCES Persona(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE EnlacePublico_Contenido (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    id_enlace INT NOT NULL,
+    id_recurso INT NULL,
+    id_album INT NULL,
+    FOREIGN KEY (id_enlace) REFERENCES EnlacePublico(id) ON DELETE CASCADE,
+    FOREIGN KEY (id_recurso) REFERENCES Recurso(id) ON DELETE CASCADE,
+    FOREIGN KEY (id_album) REFERENCES Album(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
 DELIMITER //
 
 CREATE TRIGGER crear_relacion_autor

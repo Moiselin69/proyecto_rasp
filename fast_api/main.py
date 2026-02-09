@@ -6,6 +6,7 @@ import os
 import endpointsPersona
 import endpointsAlbum
 import endpointsRecursos
+import endpointsEnlaces
 app = FastAPI(
     title="MoiselinCloud API",
     description="API para gestión de archivos y álbumes tipo nube privada",
@@ -26,6 +27,7 @@ app.add_middleware(
 app.include_router(endpointsPersona.router)
 app.include_router(endpointsAlbum.router)
 app.include_router(endpointsRecursos.router)
+app.include_router(endpointsEnlaces.router)
 @app.get("/")
 def home():
     return {"mensaje": "Bienvenido a la API de MoiselinCloud. Todo funciona correctamente."}

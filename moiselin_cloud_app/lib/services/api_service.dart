@@ -657,4 +657,37 @@ class ApiService {
     return response.statusCode == 200;
   }
 
+  Future<String?> crearEnlacePublico(
+      String token, 
+      List<int> recursosIds, // Cambiado a List
+      List<int> albumesIds,  // Cambiado a List
+      String? password, 
+      int? diasExpiracion
+  ) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/share/crear'),
+        headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'ids_recursos': recursosIds,
+          'ids_albumes': albumesIds,
+          'password': password,
+          'dias_expiracion': diasExpiracion
+        })
+      );
+      
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        // Construimos la URL completa para mostrarla
+        // data['url'] viene como "/s/TOKEN". Le pegamos el host.
+        String path = data['url'];
+        String host = baseUrl.replaceAll("/api", ""); // Quitamos /api si existe
+        return "$host$path";
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
 }

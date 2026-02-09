@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Archivo Compartido - Moiselin Cloud</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: sans-serif; background: #f0f2f5; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; max-width: 400px; width: 90%; max-height: 80vh; display: flex; flex-direction: column; }
+        .icon { font-size: 50px; color: #3f51b5; margin-bottom: 10px; }
+        h2 { margin: 10px 0; color: #333; font-size: 1.2rem; }
+        p { color: #666; font-size: 0.9rem; }
+        .btn { display: inline-block; background: #3f51b5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; margin-top: 20px; border: none; cursor: pointer; flex-shrink: 0; }
+        .btn:hover { background: #303f9f; }
+        input { padding: 10px; border: 1px solid #ddd; border-radius: 4px; width: 100%; margin-top: 10px; box-sizing: border-box; }
+        .error { color: red; font-size: 0.9em; margin-top: 10px; }
+        
+        /* Estilos para la lista */
+        .lista-archivos { 
+            text-align: left; 
+            margin: 15px 0; 
+            overflow-y: auto; 
+            border: 1px solid #eee; 
+            border-radius: 8px;
+            padding: 0;
+            flex-grow: 1; /* Ocupa el espacio disponible */
+        }
+        .item {
+            padding: 10px;
+            border-bottom: 1px solid #f0f0f0;
+            display: flex;
+            align-items: center;
+            font-size: 0.9rem;
+        }
+        .item:last-child { border-bottom: none; }
+        .item-icon { margin-right: 10px; font-size: 1.2rem; }
+        .item-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        {% if error %}
+            <div class="icon">⚠️</div>
+            <h2>Enlace no disponible</h2>
+            <p>{{ error }}</p>
+        {% elif protegido %}
+            <div class="icon">🔒</div>
+            <h2>Enlace Protegido</h2>
+            <p>Introduce la contraseña para acceder.</p>
+            <form method="post">
+                <input type="password" name="password" placeholder="Contraseña..." required autofocus>
+                <button type="submit" class="btn">Desbloquear</button>
+            </form>
+            {% if msg_error %}<p class="error">{{ msg_error }}</p>{% endif %}
+        {% else %}
+            <div class="icon">📦</div>
+            <h2>Contenido Compartido</h2>
+            <p>{{ cantidad }} elementos • {{ tamano_total }}</p>
+            
+            <div class="lista-archivos">
+                {% for item in lista_items %}
+                    <div class="item">
+                        <span class="item-icon">
+                            {% if item.tipo_item == 'ALBUM' %}📁
+                            {% elif item.tipo == 'IMAGEN' %}🖼️
+                            {% elif item.tipo == 'VIDEO' %}🎬
+                            {% elif item.tipo == 'AUDIO' %}🎵
+                            {% else %}📄{% endif %}
+                        </span>
+                        <span class="item-name">{{ item.nombre }}</span>
+                    </div>
+                {% endfor %}
+            </div>
+
+            <a href="/s/{{ token }}/download-zip" class="btn">Descargar Todo (ZIP)</a>
+        {% endif %}
+    </div>
+</body>
+</html>

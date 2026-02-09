@@ -66,8 +66,15 @@ class CambioCuota(BaseModel):
     nueva_cuota_bytes: int | None = None
 
 class LoteRecursos(BaseModel):
-    ids: List[int] # Lista de IDs [1, 5, 20, 44]
+    ids: List[int] 
 
 class LoteMover(BaseModel):
     ids: List[int]
-    id_album_destino: Optional[int] # Puede ser None si va a la raíz
+    id_album_destino: Optional[int] 
+
+class CrearEnlace(BaseModel):
+    # Ahora aceptamos listas. Si es uno solo, vendrá como una lista de 1 elemento.
+    ids_recursos: List[int] = []
+    ids_albumes: List[int] = []
+    password: Optional[str] = None
+    dias_expiracion: Optional[int] = None
