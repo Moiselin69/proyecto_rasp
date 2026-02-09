@@ -5,6 +5,9 @@ env/
 .venv/
 fast_api/static
 
+ffmpeg.exe
+ffprobe.exe
+
 # Archivos compilados de Python
 __pycache__/
 *.py[cod]

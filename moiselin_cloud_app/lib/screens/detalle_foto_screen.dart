@@ -133,7 +133,7 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
 
   void _cargarMetadatos() async {
     // 1. Optimización: Si no es una imagen, no perdemos tiempo buscando EXIF
-    if (widget.recurso.tipo != "IMAGEN") return;
+    if (widget.recurso.tipo != "IMAGEN" && widget.recurso.tipo != "VIDEO") return;
 
     // 2. Llamada a la API
     final datos = await _apiService.obtenerMetadatos(widget.token, widget.recurso.id);

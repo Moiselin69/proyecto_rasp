@@ -3,6 +3,7 @@ from mysql.connector import Error
 from datetime import datetime
 from typing import Optional, Tuple, Any, List
 import shutil
+import utilidadesMetadatos
 
 def procesar_archivo_local(id_usuario: int, ruta_fisica: str, nombre_original: str, tipo: str, fecha: Optional[datetime], id_album: Optional[int], reemplazar: bool) -> Tuple[bool, Any]:
     """
@@ -59,11 +60,33 @@ def procesar_archivo_local(id_usuario: int, ruta_fisica: str, nombre_original: s
     except Exception as e:
         print(f"Warning miniatura: {e}")
 
-    # 4. Guardar en BD
+    metadatos_extraidos = None
+    if tipo in ["IMAGEN", "VIDEO"]:
+        try:
+            metadatos_extraidos = utilidadesMetadatos.obtener_exif(ruta_fisica)
+            if metadatos_extraidos and metadatos_extraidos.get("fecha"):
+                fecha = metadatos_extraidos['fecha']
+            else:
+                print("No tiene fecha")
+        except Exception as e:
+            print(f"Error extrayendo metadatos en chunk upload: {e}")
+    # 5. Guardar en BD
     if id_existente and reemplazar:
-        return reemplazar_recurso_simple(id_existente, ruta_fisica, tipo, tamano, fecha, id_usuario)
+        # En caso de reemplazo, usamos el ID existente
+        exito, resultado = reemplazar_recurso_simple(id_existente, ruta_fisica, tipo, tamano, fecha, id_usuario)
+        if exito and metadatos_extraidos:
+             # Opcional: Podrías borrar metadatos viejos antes, pero para v1 insertamos los nuevos
+             guardar_metadatos(id_existente, metadatos_extraidos)
+        return exito, resultado
     else:
-        return subir_recurso(id_usuario, tipo, ruta_fisica, nombre_original, tamano, fecha, id_album)
+        # Caso nuevo recurso
+        exito, id_recurso = subir_recurso(id_usuario, tipo, ruta_fisica, nombre_original, tamano, fecha, id_album)
+        
+        # SI LA SUBIDA FUE ÉXITOSA, GUARDAMOS LOS METADATOS
+        if exito and metadatos_extraidos:
+            guardar_metadatos(id_recurso, metadatos_extraidos) # <--- AQUÍ SE GUARDAN
+            
+        return exito, id_recurso
 
 def subir_recurso(id_creador: int, tipo: str, enlace: str, nombre: str, tamano: int, fecha_real: Optional[datetime] = None, id_album: Optional[int] = None) -> Tuple[bool, Any]:
     connection = None
@@ -118,32 +141,6 @@ def verificar_espacio_usuario(id_usuario: int, tamano_nuevo_archivo: int) -> Tup
     except Error as e:
         return False, str(e)
     finally:
-        if connection: connection.close()
-
-def reemplazar_recurso_simple(id_recurso: int, nuevo_enlace: str, nuevo_tipo: str, nuevo_tamano: int, nueva_fecha_real: Optional[datetime], id_usuario: int) -> Tuple[bool, Any]:
-    connection = None
-    cursor = None
-    try:
-        connection = db.get_connection()
-        connection.autocommit = False
-        cursor = connection.cursor()
-        cursor.execute("SELECT enlace FROM Recurso WHERE id = %s AND id_creador = %s", (id_recurso, id_usuario))
-        resultado = cursor.fetchone()
-        if not resultado: return False, "Recurso no encontrado"
-        ruta_vieja = resultado[0]
-        sql_update = """
-            UPDATE Recurso 
-            SET enlace = %s, tipo = %s, tamano = %s, fecha_real = %s, fecha_subida = NOW(), fecha_eliminacion = NULL
-            WHERE id = %s AND id_creador = %s
-        """
-        cursor.execute(sql_update, (nuevo_enlace, nuevo_tipo, nuevo_tamano, nueva_fecha_real, id_recurso, id_usuario))
-        connection.commit()
-        return True, ruta_vieja
-    except Error as e:
-        if connection: connection.rollback()
-        return False, str(e)
-    finally:
-        if cursor: cursor.close()
         if connection: connection.close()
 
 def obtener_recursos(id_persona:int):
@@ -670,7 +667,7 @@ def check_recurso_existe_en_album(id_usuario: int, nombre: str, id_album: Option
         if cursor: cursor.close()
         if connection and connection.is_connected(): connection.close()
 
-def reemplazar_recurso_simple(id_recurso: int, nuevo_enlace: str, nuevo_tipo: str, nueva_fecha_real: Optional[datetime], id_usuario: int) -> Tuple[bool, Any]:
+def reemplazar_recurso_simple(id_recurso: int, nuevo_enlace: str, nuevo_tipo: str, nuevo_tamano: int, nueva_fecha_real: Optional[datetime], id_usuario: int) -> Tuple[bool, Any]:
     """
     Actualiza el recurso existente con el nuevo archivo.
     Devuelve (True, ruta_archivo_viejo) para poder borrarlo del disco.
@@ -691,14 +688,13 @@ def reemplazar_recurso_simple(id_recurso: int, nuevo_enlace: str, nuevo_tipo: st
             
         ruta_vieja = resultado[0]
 
-        # 2. Actualizar la tabla con los datos del NUEVO archivo
-        # Mantenemos el ID, pero cambiamos el enlace, el tipo y la fecha
+        # 2. Actualizar la tabla con los datos del NUEVO archivo (Incluyendo fecha_real)
         sql_update = """
             UPDATE Recurso 
-            SET enlace = %s, tipo = %s, fecha_real = %s, fecha_subida = NOW(), fecha_eliminacion = NULL
+            SET enlace = %s, tipo = %s, tamano = %s, fecha_real = %s, fecha_subida = NOW(), fecha_eliminacion = NULL
             WHERE id = %s AND id_creador = %s
         """
-        cursor.execute(sql_update, (nuevo_enlace, nuevo_tipo, nueva_fecha_real, id_recurso, id_usuario))
+        cursor.execute(sql_update, (nuevo_enlace, nuevo_tipo, nuevo_tamano, nueva_fecha_real, id_recurso, id_usuario))
         
         connection.commit()
         
@@ -811,15 +807,109 @@ def guardar_metadatos(id_recurso, meta):
     finally:
         if connection: connection.close()
 
-def obtener_metadatos(id_recurso):
-    """Recupera los metadatos para enviarlos al frontend"""
+def obtener_metadatos(id_recurso: int):
+    connection = None
+    cursor = None
+    try:
+        connection = db.get_connection()
+        # Usamos dictionary=True para que devuelva un JSON bonito
+        cursor = connection.cursor(dictionary=True)
+        
+        sql = """
+            SELECT dispositivo, iso, apertura, velocidad, latitud, longitud, ancho, alto 
+            FROM Metadatos 
+            WHERE id_recurso = %s
+        """
+        cursor.execute(sql, (id_recurso,))
+        
+        # --- LA SOLUCIÓN AL ERROR ---
+        # Tienes que leer el resultado SIEMPRE, aunque sea None.
+        resultado = cursor.fetchone()
+        
+        # Si hubiera más resultados pendientes (imposible por ser PK, pero por seguridad),
+        # esto limpia el buffer:
+        try: cursor.fetchall() 
+        except: pass 
+        
+        return resultado
+
+    except Exception as e:
+        print(f"Error obteniendo metadatos: {e}")
+        return None
+    finally:
+        # Es CRÍTICO cerrar primero el cursor y luego la conexión
+        if cursor: 
+            try: cursor.close()
+            except: pass
+        if connection and connection.is_connected(): 
+            connection.close()
+
+def purgar_papelera_automatica(dias_retencion: int = 30):
+    """
+    Busca recursos que llevan más de 'dias_retencion' en la papelera 
+    y los elimina físicamente y de la BD.
+    """
+    import os
     connection = None
     try:
         connection = db.get_connection()
         cursor = connection.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM Metadatos WHERE id_recurso = %s", (id_recurso,))
-        return cursor.fetchone()
-    except Exception:
-        return None
+        
+        # 1. Buscar archivos caducados (MySQL syntax)
+        print(f"[{datetime.now()}] Ejecutando purga automática de papelera...")
+        
+        sql_buscar = """
+            SELECT id, enlace, tipo 
+            FROM Recurso 
+            WHERE fecha_eliminacion IS NOT NULL 
+              AND fecha_eliminacion < DATE_SUB(NOW(), INTERVAL %s DAY)
+        """
+        cursor.execute(sql_buscar, (dias_retencion,))
+        archivos_a_borrar = cursor.fetchall()
+        
+        if not archivos_a_borrar:
+            print("Papelera limpia. No hay archivos antiguos para borrar.")
+            return
+
+        print(f"Encontrados {len(archivos_a_borrar)} archivos antiguos para eliminar permanentemente.")
+
+        # 2. Borrar archivos físicos
+        ids_a_borrar = []
+        for recurso in archivos_a_borrar:
+            ids_a_borrar.append(recurso['id'])
+            
+            # Borrar Original
+            ruta_original = recurso['enlace']
+            try:
+                if os.path.exists(ruta_original):
+                    os.remove(ruta_original)
+            except Exception as e:
+                print(f"Error borrando físico {ruta_original}: {e}")
+
+            # Borrar Miniatura
+            try:
+                ruta_thumb = ruta_original.replace("uploads", "thumbnails")
+                if os.path.exists(ruta_thumb):
+                    os.remove(ruta_thumb)
+                else:
+                    # Intentar con extensión jpg por si acaso (para videos)
+                    nombre_sin_ext = os.path.splitext(ruta_thumb)[0]
+                    ruta_thumb_jpg = nombre_sin_ext + ".jpg"
+                    if os.path.exists(ruta_thumb_jpg):
+                        os.remove(ruta_thumb_jpg)
+            except Exception as e:
+                print(f"Error borrando thumbnail de {recurso['id']}: {e}")
+
+        # 3. Borrar de la Base de Datos (En lote)
+        if ids_a_borrar:
+            format_strings = ','.join(['%s'] * len(ids_a_borrar))
+            sql_delete = f"DELETE FROM Recurso WHERE id IN ({format_strings})"
+            cursor.execute(sql_delete, tuple(ids_a_borrar))
+            connection.commit()
+            print(f"Eliminados {cursor.rowcount} registros de la base de datos correctamente.")
+
+    except Exception as e:
+        print(f"Error CRÍTICO en purga automática: {e}")
     finally:
-        if connection: connection.close()
+        if connection and connection.is_connected():
+            connection.close()

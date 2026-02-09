@@ -34,6 +34,8 @@ class GaleriaScreen extends StatefulWidget {
 class _GaleriaScreenState extends State<GaleriaScreen> {
   final ApiService _apiService = ApiService();
   final DownloadService _downloadService = DownloadService();
+  int _columnas = 3;
+  int _columnasBase = 3;
   bool _cargando = true;
   bool _esAdmin = false;
   bool _subiendo = false;
@@ -1143,8 +1145,6 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
       ),
       body: Stack(
         children: [
-          // CAPA 1: TU CONTENIDO ORIGINAL (Filtros + Grid)
-          // Aquí pegamos tu Column exactamente como la tenías
           Column(
             children: [
               // Filtros
@@ -1213,14 +1213,32 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
 
               // Grid
               Expanded(
-                child: _cargando 
-                  ? const Center(child: CircularProgressIndicator())
-                  : (_albumesVisibles.isEmpty && _recursosFiltrados.isEmpty)
-                      ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: const [Icon(Icons.search_off, size: 60, color: Colors.grey), SizedBox(height: 10), Text("Carpeta vacía")]))
-                      : GridView.builder(
+              child: _cargando 
+                ? const Center(child: CircularProgressIndicator())
+                : (_albumesVisibles.isEmpty && _recursosFiltrados.isEmpty)
+                    ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: const [Icon(Icons.search_off, size: 60, color: Colors.grey), SizedBox(height: 10), Text("Carpeta vacía")]))
+                    : GestureDetector(
+                        // IMPORTANTE: Esto permite detectar gestos en los huecos vacíos
+                        behavior: HitTestBehavior.translucent, 
+                        
+                        onScaleStart: (details) {
+                          _columnasBase = _columnas;
+                        },
+                        onScaleUpdate: (details) {
+                          setState(() {
+                            // Convertimos la escala en número de columnas
+                            double nuevas = _columnasBase / details.scale;
+                            
+                            // .clamp(2, 6) asegura que no se rompa el diseño (mínimo 2, máximo 6 columnas)
+                            _columnas = nuevas.round().clamp(2, 6);
+                          });
+                        },
+                        child: GridView.builder(
+                          // IMPORTANTE: physics: AlwaysScrollableScrollPhysics() ayuda a que el scroll no "robe" el gesto tan fácilmente
+                          physics: const AlwaysScrollableScrollPhysics(),
                           padding: const EdgeInsets.all(8),
-                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 3, 
+                          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: _columnas, // <--- Aquí se aplica el cambio
                             crossAxisSpacing: 8,
                             mainAxisSpacing: 8,
                             childAspectRatio: 0.8,
@@ -1233,6 +1251,8 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                               final recurso = _recursosFiltrados[index - _albumesFiltrados.length];
                               final isSelected = _recursosSeleccionados.contains(recurso.id);
                               final urlImagen = "${ApiService.baseUrl}${recurso.urlThumbnail}";
+                              
+                              // GestureDetector de la foto individual
                               return GestureDetector(
                                 onLongPress: () => _toggleSeleccionRecurso(recurso.id),
                                 onTap: () {
@@ -1276,7 +1296,8 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                             }
                           },
                         ),
-              ),
+                      ),
+            ),
             ],
           ),
 

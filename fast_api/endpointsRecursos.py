@@ -48,7 +48,7 @@ async def subir_archivo(tipo: str = Form(...), fecha: Optional[datetime] = Form(
         if os.path.exists(ruta_completa_original): os.remove(ruta_completa_original)
         raise HTTPException(status_code=500, detail=f"Error verificando cuota: {str(e)}")
     metadatos_extraidos = None
-    if tipo == "IMAGEN":
+    if tipo in ["IMAGEN", "VIDEO"]:
         metadatos_extraidos = utilidadesMetadatos.obtener_exif(ruta_completa_original)
     try: # 4. Generar Miniaturas (Solo si pasó la prueba de espacio)
         if tipo == "IMAGEN":
@@ -88,7 +88,7 @@ async def subir_archivo(tipo: str = Form(...), fecha: Optional[datetime] = Form(
                  except: pass
         if exito:
             if metadatos_extraidos:
-                consultasRecursos.guardar_metadatos(id_recurso, metadatos_extraidos)
+                consultasRecursos.guardar_metadatos(id_existente, metadatos_extraidos)
         return {"mensaje": "Archivo reemplazado correctamente", "id_recurso": id_existente}
     else: # CASO B: 
         exito, id_recurso = consultasRecursos.subir_recurso(current_user_id, tipo, enlace_db, file.filename, tamano_archivo,fecha, id_album_int)

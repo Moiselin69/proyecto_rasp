@@ -7,10 +7,22 @@ import endpointsPersona
 import endpointsAlbum
 import endpointsRecursos
 import endpointsEnlaces
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from contextlib import asynccontextmanager
+import consultasRecursos
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(consultasRecursos.purgar_papelera_automatica, 'interval', hours=24)
+    scheduler.start()
+    yield
+    scheduler.shutdown()
+
 app = FastAPI(
     title="MoiselinCloud API",
     description="API para gestión de archivos y álbumes tipo nube privada",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 if not os.path.exists("static"):
     os.makedirs("static")
