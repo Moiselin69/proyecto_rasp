@@ -15,6 +15,9 @@ import 'compartidos_screen.dart';
 import 'papelera_screen.dart';
 import 'admin_screen.dart';
 import 'package:flutter/services.dart';
+import 'package:wechat_assets_picker/wechat_assets_picker.dart';
+import 'package:photo_manager/photo_manager.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class GaleriaScreen extends StatefulWidget {
   final String token;
@@ -36,6 +39,7 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
   final DownloadService _downloadService = DownloadService();
   int _columnas = 3;
   int _columnasBase = 3;
+  bool _haciendoZoom = false;
   bool _cargando = true;
   bool _esAdmin = false;
   bool _subiendo = false;
@@ -533,120 +537,223 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
     return 'ARCHIVO';
   }
 
-  Future<void> _subirArchivoUniversal() async {
-    // 1. Permitir múltiples archivos
-    FilePickerResult? result = await FilePicker.platform.pickFiles(allowMultiple: true);
-
-    if (result != null && result.files.isNotEmpty) {
-      
-      // Inicializamos la UI de subida
-      setState(() {
-        _subiendo = true;
-        _progreso = 0.0;
-      });
-
-      int total = result.files.length;
-      int completados = 0;
-      int errores = 0;
-      
-      // Bucle para procesar cada archivo uno a uno (Cola secuencial)
-      for (int i = 0; i < total; i++) {
-        var fileInfo = result.files[i];
-        
-        if (fileInfo.path == null) continue;
-        
-        File file = File(fileInfo.path!);
-        String nombreArchivo = fileInfo.name;
-        String tipo = _obtenerTipoArchivo(file.path);
-
-        // Actualizamos el mensaje: "Subiendo 1 de 5: vacaciones.jpg"
-        if (mounted) {
-          setState(() {
-            _mensajeSubida = "Subiendo ${i + 1} de $total:\n$nombreArchivo";
-            _progreso = 0.0; // Reseteamos la barra para este archivo
-          });
-        }
-
-        // --- Verificación de Duplicado ---
-        bool existe = await _apiService.verificarDuplicado(widget.token, nombreArchivo, widget.parentId);
-        bool reemplazar = false;
-        
-        if (existe) {
-          // Pausamos el bucle para preguntar al usuario
-          bool? confirmacion = await showDialog<bool>(
-            context: context,
-            barrierDismissible: false, // Obligamos a responder
-            builder: (ctx) => AlertDialog(
-              title: Text("Archivo duplicado (${i + 1}/$total)"),
-              content: Text("'$nombreArchivo' ya existe.\n¿Deseas reemplazarlo?"),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx, false), // SALTAR este archivo
-                  child: const Text("Saltar"),
-                ),
-                ElevatedButton(
-                  onPressed: () => Navigator.pop(ctx, true), // REEMPLAZAR
-                  child: const Text("Reemplazar"),
-                ),
-              ],
+  void _mostrarOpcionesSubida() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true, // Importante para que se ajuste bien
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        // Añadimos padding para que no se pegue a los bordes
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 20), 
+        child: Column(
+          mainAxisSize: MainAxisSize.min, // <--- ESTA ES LA CLAVE: "Ocupa solo lo necesario"
+          children: [
+            // Pequeña barra decorativa superior
+            Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 20),
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
             ),
-          );
-          
-          if (confirmacion == null) {
-             // Si cierra el diálogo sin elegir, saltamos este archivo
-             continue; 
-          }
-          if (confirmacion == false) {
-             // Si elige "Saltar", no subimos y pasamos al siguiente
-             continue; 
-          }
-          reemplazar = true;
-        }
+            const Text("¿Qué deseas subir?", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 20),
+            
+            // Opción A: Galería
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: Colors.blue.withOpacity(0.1), shape: BoxShape.circle),
+                child: const Icon(Icons.photo_library, color: Colors.blue),
+              ),
+              title: const Text("Fotos y Vídeos"),
+              subtitle: const Text("Galería (Permite borrar original)"),
+              onTap: () {
+                Navigator.pop(ctx);
+                _subirDesdeGaleria();
+              },
+            ),
+            
+            const SizedBox(height: 10), 
 
-        // --- Subida por Chunks ---
-        String? resultado = await _apiService.subirPorChunks(
-          widget.token, 
-          file, 
-          tipo, 
-          idAlbum: widget.parentId,
-          reemplazar: reemplazar,
-          onProgress: (p) {
-            if (mounted) setState(() => _progreso = p);
-          }
-        );
+            // Opción B: Archivos
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: Colors.orange.withOpacity(0.1), shape: BoxShape.circle),
+                child: const Icon(Icons.insert_drive_file, color: Colors.orange),
+              ),
+              title: const Text("Archivos"),
+              subtitle: const Text("Documentos, PDF, Audio..."),
+              onTap: () {
+                Navigator.pop(ctx);
+                _subirDesdeArchivos();
+              },
+            ),
+            
+            // Añadimos un espacio extra abajo por seguridad en algunos móviles
+            const SizedBox(height: 20), 
+          ],
+        ),
+      ),
+    );
+  }
 
-        if (resultado != null && !resultado.contains("Error") && resultado != "DUPLICADO") {
-          // ÉXITO
-          completados++;
-          bool borrar = await ApiService.getBorrarAlSubir();
-          if (borrar) { try { if (await file.exists()) await file.delete(); } catch (e) {} }
-        } else {
-          // ERROR
-          errores++;
-          print("Error subiendo $nombreArchivo: $resultado");
-        }
+  Future<void> _subirDesdeGaleria() async {
+    // 1. Selector de fotos
+    final List<AssetEntity>? assets = await AssetPicker.pickAssets(
+      context,
+      pickerConfig: const AssetPickerConfig(
+        maxAssets: 100, // Permitimos más fotos
+        requestType: RequestType.common,
+        textDelegate: SpanishAssetPickerTextDelegate(), // Tu traducción al español
+      ),
+    );
+
+    if (assets == null || assets.isEmpty) return;
+
+    // Verificar si el usuario tiene activado el "Borrar al subir"
+    bool borrarAlFinalizar = await ApiService.getBorrarAlSubir();
+    
+    // Lista para acumular los IDs de las fotos que se suban con éxito
+    List<String> idsParaBorrar = []; 
+
+    setState(() {
+      _subiendo = true;
+      _progreso = 0.0;
+    });
+
+    // 2. Bucle de Subida
+    for (int i = 0; i < assets.length; i++) {
+      AssetEntity asset = assets[i];
+      File? file = await asset.file;
+
+      if (file == null) continue;
+
+      String nombre = asset.title ?? "media_${DateTime.now().millisecondsSinceEpoch}";
+      if (!nombre.contains('.')) {
+        nombre += (asset.type == AssetType.video ? '.mp4' : '.jpg');
       }
-
-      // --- Final del proceso ---
+      
+      // Actualizamos UI
       if (mounted) {
-        setState(() => _subiendo = false);
-        _cargarDatos(); // Recargar galería
+        setState(() {
+          _mensajeSubida = "Subiendo ${i + 1} de ${assets.length}:\n$nombre";
+        });
+      }
+      
+      // Llamada a la API
+      String? res = await _apiService.subirPorChunks(
+        widget.token,
+        file,
+        asset.type == AssetType.video ? 'VIDEO' : 'IMAGEN',
+        idAlbum: widget.parentId,
+        reemplazar: false,
+        onProgress: (p) {
+          if (mounted) setState(() => _progreso = p);
+        },
+      );
 
-        String mensajeFinal = "";
-        Color colorFinal = Colors.green;
-
-        if (errores == 0) {
-          mensajeFinal = "Se han subido $completados archivos correctamente.";
-        } else {
-          mensajeFinal = "Subidos: $completados. Errores: $errores.";
-          colorFinal = Colors.orange;
+      // 3. Si se subió bien, AÑADIMOS A LA LISTA DE BORRADO (No borramos aún)
+      if (res != null && !res.contains("Error")) {
+        if (borrarAlFinalizar) {
+          idsParaBorrar.add(asset.id);
         }
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(mensajeFinal), backgroundColor: colorFinal)
-        );
       }
     }
+
+    // 4. Bucle finalizado: AHORA BORRAMOS TODOS DE GOLPE
+    if (idsParaBorrar.isNotEmpty) {
+      if (mounted) {
+        setState(() {
+          _mensajeSubida = "Limpiando galería...";
+        });
+      }
+
+      try {
+        // ESTO ES LA CLAVE: Le pasamos la lista entera de una vez.
+        // El sistema mostrará UN SOLO POPUP: "¿Borrar 35 elementos?"
+        final List<String> result = await PhotoManager.editor.deleteWithIds(idsParaBorrar);
+        
+        if (result.isNotEmpty) {
+          print("✅ Se han movido ${result.length} elementos a la papelera del móvil.");
+        }
+      } catch (e) {
+        print("❌ Error al intentar borrar el lote: $e");
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("No se pudieron borrar las fotos de la galería (Falta permiso)")),
+          );
+        }
+      }
+    }
+    
+    // 5. Finalizar proceso
+    if (mounted) {
+      setState(() => _subiendo = false);
+      _cargarDatos();
+      
+      String mensajeFinal = idsParaBorrar.isNotEmpty 
+          ? "Subida completa. Se han borrado los originales."
+          : "Subida completa.";
+          
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(mensajeFinal), backgroundColor: Colors.green),
+      );
+    }
+  }
+
+  Future<void> _subirDesdeArchivos() async {
+    // Primero: Pedir permiso "MANAGE_EXTERNAL_STORAGE" si queremos borrar el original
+    if (Platform.isAndroid) {
+       var status = await Permission.manageExternalStorage.status;
+       if (!status.isGranted) {
+         await Permission.manageExternalStorage.request();
+       }
+    }
+
+    FilePickerResult? result = await FilePicker.platform.pickFiles(allowMultiple: true);
+    if (result == null) return;
+
+    setState(() { _subiendo = true; _progreso = 0.0; });
+
+    List<PlatformFile> files = result.files;
+    for (int i = 0; i < files.length; i++) {
+      if (files[i].path == null) continue;
+      File file = File(files[i].path!);
+      String nombre = files[i].name;
+      String tipo = _obtenerTipoArchivo(file.path);
+
+      // -- SUBIDA --
+      if (mounted) setState(() => _mensajeSubida = "Subiendo ${i+1}/${files.length}:\n$nombre");
+
+      String? res = await _apiService.subirPorChunks(
+          widget.token, file, tipo,
+          idAlbum: widget.parentId, reemplazar: false,
+          onProgress: (p) => setState(() => _progreso = p));
+
+      // -- BORRADO DISCO --
+      if (res != null && !res.contains("Error")) {
+         bool borrar = await ApiService.getBorrarAlSubir();
+         if (borrar) {
+           try {
+             if (await file.exists()) {
+               await file.delete(); // Intenta borrar el archivo
+               print("Archivo borrado del disco");
+             }
+           } catch (e) {
+             print("No se pudo borrar el archivo (Falta permiso MANAGE_STORAGE): $e");
+             // Aquí podrías mostrar un SnackBar diciendo "No tenemos permiso para borrar archivos del sistema"
+           }
+         }
+      }
+    }
+
+    if (mounted) { setState(() => _subiendo = false); _cargarDatos(); }
   }
 
   void _mostrarCrearAlbumDialog() {
@@ -1218,82 +1325,101 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                 : (_albumesVisibles.isEmpty && _recursosFiltrados.isEmpty)
                     ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: const [Icon(Icons.search_off, size: 60, color: Colors.grey), SizedBox(height: 10), Text("Carpeta vacía")]))
                     : GestureDetector(
-                        // IMPORTANTE: Esto permite detectar gestos en los huecos vacíos
-                        behavior: HitTestBehavior.translucent, 
+                        behavior: HitTestBehavior.translucent,
                         
+                        // 1. AL INICIAR EL GESTO: Bloqueamos el scroll
                         onScaleStart: (details) {
-                          _columnasBase = _columnas;
-                        },
-                        onScaleUpdate: (details) {
                           setState(() {
-                            // Convertimos la escala en número de columnas
-                            double nuevas = _columnasBase / details.scale;
-                            
-                            // .clamp(2, 6) asegura que no se rompa el diseño (mínimo 2, máximo 6 columnas)
-                            _columnas = nuevas.round().clamp(2, 6);
+                            _columnasBase = _columnas;
+                            _haciendoZoom = true; // <--- NUEVO: Activamos modo zoom
                           });
                         },
+
+                        // 2. DURANTE EL GESTO: Calculamos columnas
+                        onScaleUpdate: (details) {
+                          // Solo calculamos si la escala ha variado lo suficiente para evitar parpadeos
+                          if (details.scale != 1.0) {
+                            setState(() {
+                              double nuevas = _columnasBase / details.scale;
+                              _columnas = nuevas.round().clamp(2, 6);
+                            });
+                          }
+                        },
+
+                        // 3. AL TERMINAR EL GESTO: Reactivamos el scroll
+                        onScaleEnd: (details) {
+                          setState(() {
+                            _haciendoZoom = false; // <--- NUEVO: Desactivamos modo zoom
+                          });
+                        },
+
                         child: GridView.builder(
-                          // IMPORTANTE: physics: AlwaysScrollableScrollPhysics() ayuda a que el scroll no "robe" el gesto tan fácilmente
-                          physics: const AlwaysScrollableScrollPhysics(),
+                          // 4. AQUÍ ESTÁ LA MAGIA:
+                          // Si estamos haciendo zoom, prohibimos el scroll (NeverScrollable).
+                          // Si no, permitimos el scroll normal (AlwaysScrollable).
+                          physics: _haciendoZoom 
+                              ? const NeverScrollableScrollPhysics() 
+                              : const AlwaysScrollableScrollPhysics(),
+                          
                           padding: const EdgeInsets.all(8),
                           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: _columnas, // <--- Aquí se aplica el cambio
+                            crossAxisCount: _columnas,
                             crossAxisSpacing: 8,
                             mainAxisSpacing: 8,
                             childAspectRatio: 0.8,
                           ),
                           itemCount: _albumesFiltrados.length + _recursosFiltrados.length,
                           itemBuilder: (context, index) {
-                            if (index < _albumesFiltrados.length) {
-                              return _buildCarpeta(_albumesFiltrados[index]);
-                            } else {
-                              final recurso = _recursosFiltrados[index - _albumesFiltrados.length];
-                              final isSelected = _recursosSeleccionados.contains(recurso.id);
-                              final urlImagen = "${ApiService.baseUrl}${recurso.urlThumbnail}";
-                              
-                              // GestureDetector de la foto individual
-                              return GestureDetector(
-                                onLongPress: () => _toggleSeleccionRecurso(recurso.id),
-                                onTap: () {
-                                  if (_modoSeleccion) {
-                                    _toggleSeleccionRecurso(recurso.id);
-                                  } else {
-                                    Navigator.push(context, MaterialPageRoute(builder: (_) => DetalleRecursoScreen(recurso: recurso, token: widget.token))).then((_) => _cargarDatos());
-                                  }
-                                },
-                                child: Stack(
-                                  fit: StackFit.expand,
-                                  children: [
-                                    ClipRRect(
-                                      borderRadius: BorderRadius.circular(12),
-                                      child: (recurso.esImagen || recurso.esVideo)
-                                        ? CachedNetworkImage(
-                                            imageUrl: urlImagen,
-                                            httpHeaders: {"Authorization": "Bearer ${widget.token}"},
-                                            fit: BoxFit.cover,
-                                            placeholder: (context, url) => Container(color: Colors.grey[200]),
-                                            errorWidget: (context, url, error) => const Icon(Icons.error),
-                                          )
-                                        : _getIconoArchivo(recurso),
-                                    ),
-                                    if (recurso.tipo == "VIDEO")
-                                      Center(child: Container(decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle), child: const Icon(Icons.play_arrow, color: Colors.white, size: 30))),
-                                    if (_modoSeleccion)
-                                      Container(
-                                        decoration: BoxDecoration(
-                                          color: isSelected ? Colors.blue.withOpacity(0.4) : Colors.transparent,
-                                          borderRadius: BorderRadius.circular(12),
-                                          border: isSelected ? Border.all(color: Colors.blue, width: 3) : null,
-                                        ),
-                                        child: isSelected 
-                                          ? const Icon(Icons.check_circle, color: Colors.white, size: 30)
-                                          : const Align(alignment: Alignment.topRight, child: Padding(padding: EdgeInsets.all(8), child: Icon(Icons.radio_button_unchecked, color: Colors.white))),
-                                      ),
-                                  ],
-                                ),
-                              );
-                            }
+                             // ... (Tu código del itemBuilder sigue EXACTAMENTE IGUAL) ...
+                             // ... Copia aquí tu lógica de carpetas y recursos ...
+                             if (index < _albumesFiltrados.length) {
+                               return _buildCarpeta(_albumesFiltrados[index]);
+                             } else {
+                               final recurso = _recursosFiltrados[index - _albumesFiltrados.length];
+                               final isSelected = _recursosSeleccionados.contains(recurso.id);
+                               final urlImagen = "${ApiService.baseUrl}${recurso.urlThumbnail}";
+                               
+                               return GestureDetector(
+                                 onLongPress: () => _toggleSeleccionRecurso(recurso.id),
+                                 onTap: () {
+                                    if (_modoSeleccion) {
+                                      _toggleSeleccionRecurso(recurso.id);
+                                    } else {
+                                      Navigator.push(context, MaterialPageRoute(builder: (_) => DetalleRecursoScreen(recurso: recurso, token: widget.token))).then((_) => _cargarDatos());
+                                    }
+                                 },
+                                 child: Stack(
+                                   fit: StackFit.expand,
+                                   children: [
+                                     ClipRRect(
+                                       borderRadius: BorderRadius.circular(12),
+                                       child: (recurso.esImagen || recurso.esVideo)
+                                         ? CachedNetworkImage(
+                                             imageUrl: urlImagen,
+                                             httpHeaders: {"Authorization": "Bearer ${widget.token}"},
+                                             fit: BoxFit.cover,
+                                             placeholder: (context, url) => Container(color: Colors.grey[200]),
+                                             errorWidget: (context, url, error) => const Icon(Icons.error),
+                                           )
+                                         : _getIconoArchivo(recurso),
+                                     ),
+                                     if (recurso.tipo == "VIDEO")
+                                       Center(child: Container(decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle), child: const Icon(Icons.play_arrow, color: Colors.white, size: 30))),
+                                     if (_modoSeleccion)
+                                       Container(
+                                         decoration: BoxDecoration(
+                                           color: isSelected ? Colors.blue.withOpacity(0.4) : Colors.transparent,
+                                           borderRadius: BorderRadius.circular(12),
+                                           border: isSelected ? Border.all(color: Colors.blue, width: 3) : null,
+                                         ),
+                                         child: isSelected 
+                                           ? const Icon(Icons.check_circle, color: Colors.white, size: 30)
+                                           : const Align(alignment: Alignment.topRight, child: Padding(padding: EdgeInsets.all(8), child: Icon(Icons.radio_button_unchecked, color: Colors.white))),
+                                       ),
+                                   ],
+                                 ),
+                               );
+                             }
                           },
                         ),
                       ),
@@ -1365,11 +1491,102 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
           SizedBox(height: 10),
           FloatingActionButton(
             heroTag: "btnFile",
-            onPressed: _cargando ? null : _subirArchivoUniversal,
+            onPressed: _cargando ? null : _mostrarOpcionesSubida,
             child: _cargando ? CircularProgressIndicator(color: Colors.white) : Icon(Icons.file_upload),
           ),
         ],
       ),
     );
   }
+}
+
+class SpanishAssetPickerTextDelegate extends AssetPickerTextDelegate {
+  const SpanishAssetPickerTextDelegate();
+
+  @override
+  String get languageCode => 'es';
+
+  @override
+  String get confirm => 'Confirmar';
+
+  @override
+  String get cancel => 'Cancelar';
+
+  @override
+  String get edit => 'Editar';
+
+  @override
+  String get gifIndicator => 'GIF';
+
+  @override
+  String get loadFailed => 'Fallo de carga';
+
+  @override
+  String get original => 'Original';
+
+  @override
+  String get preview => 'Vista previa';
+
+  @override
+  String get select => 'Seleccionar';
+
+  @override
+  String get emptyList => 'Lista vacía';
+
+  @override
+  String get unSupportedAssetType => 'Tipo no soportado';
+
+  @override
+  String get unableToAccessAll => 'No se puede acceder a todos los archivos';
+
+  @override
+  String get viewingLimitedAssetsTip => 'Solo ver archivos accesibles';
+
+  @override
+  String get changeAccessibleLimitedAssets => 'Haz clic para actualizar acceso';
+
+  @override
+  String get accessAllTip => 'La app solo puede acceder a algunos archivos. Ve a ajustes del sistema y permite el acceso a todos los medios.';
+
+  @override
+  String get goToSystemSettings => 'Ir a Ajustes';
+
+  @override
+  String get accessLimitedAssets => 'Continuar con acceso limitado';
+
+  @override
+  String get accessiblePathName => 'Recientes';
+
+  @override
+  String get sTypeAudioLabel => 'Audio';
+
+  @override
+  String get sTypeImageLabel => 'Imagen';
+
+  @override
+  String get sTypeVideoLabel => 'Vídeo';
+
+  @override
+  String get sTypeOtherLabel => 'Otro';
+
+  @override
+  String get sActionPlayHint => 'reproducir';
+
+  @override
+  String get sActionPreviewHint => 'vista previa';
+
+  @override
+  String get sActionSelectHint => 'seleccionar';
+
+  @override
+  String get sActionSwitchPathLabel => 'cambiar ruta';
+
+  @override
+  String get sActionUseCameraHint => 'usar cámara';
+
+  @override
+  String get sNameDurationLabel => 'duración';
+
+  @override
+  String get sUnitAssetCountLabel => 'archivos';
 }
