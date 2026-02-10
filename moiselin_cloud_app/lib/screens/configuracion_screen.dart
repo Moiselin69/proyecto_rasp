@@ -91,8 +91,8 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
                 const SizedBox(height: 10),
                 Card(
                   child: SwitchListTile(
-                    title: const Text('Liberar cache automáticamente'),
-                    subtitle: const Text('Borrar el archivo de la cache del móvil después de subirlo con éxito a la nube.'),
+                    title: const Text('Liberar memoria automáticamente'),
+                    subtitle: const Text('Borrar recursos de la memoria del dispositivo después de subirlo con éxito a la nube.'),
                     secondary: const Icon(Icons.delete_forever, color: Colors.red),
                     value: _borrarAlSubir,
                     onChanged: (bool value) {

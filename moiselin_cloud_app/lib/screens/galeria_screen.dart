@@ -17,7 +17,6 @@ import 'admin_screen.dart';
 import 'package:flutter/services.dart';
 import 'package:wechat_assets_picker/wechat_assets_picker.dart';
 import 'package:photo_manager/photo_manager.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 class GaleriaScreen extends StatefulWidget {
   final String token;
@@ -675,12 +674,9 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
       }
 
       try {
-        // ESTO ES LA CLAVE: Le pasamos la lista entera de una vez.
-        // El sistema mostrará UN SOLO POPUP: "¿Borrar 35 elementos?"
         final List<String> result = await PhotoManager.editor.deleteWithIds(idsParaBorrar);
-        
         if (result.isNotEmpty) {
-          print("✅ Se han movido ${result.length} elementos a la papelera del móvil.");
+          print(" Se han movido ${result.length} elementos a la papelera del móvil.");
         }
       } catch (e) {
         print("❌ Error al intentar borrar el lote: $e");
@@ -707,14 +703,48 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
     }
   }
 
+  void _mostrarAlertaPermisos(String mensaje) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Falta permiso"),
+        content: Text(mensaje),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Cancelar"),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              PhotoManager.openSetting(); // Lleva al usuario a Ajustes de iOS
+            },
+            child: const Text("Abrir Ajustes"),
+          ),
+        ],
+      ),
+    );
+}
+
   Future<void> _subirDesdeArchivos() async {
     // Primero: Pedir permiso "MANAGE_EXTERNAL_STORAGE" si queremos borrar el original
-    if (Platform.isAndroid) {
-       var status = await Permission.manageExternalStorage.status;
-       if (!status.isGranted) {
-         await Permission.manageExternalStorage.request();
-       }
+    final PermissionState ps = await PhotoManager.requestPermissionExtend();
+    if (!ps.hasAccess) {
+      _mostrarAlertaPermisos("Se requiere acceso a la galería.");
+      return;
     }
+    await AssetPicker.pickAssets(
+      context,
+      pickerConfig: const AssetPickerConfig(
+        maxAssets: 100,
+        requestType: RequestType.common,
+        textDelegate: SpanishAssetPickerTextDelegate(),
+        
+        // IMPORTANTE PARA IOS:
+        // Esto hace que si el usuario tiene acceso limitado, el picker se comporte correctamente
+        limitedPermissionOverlayPredicate: null, 
+      ),
+    );
 
     FilePickerResult? result = await FilePicker.platform.pickFiles(allowMultiple: true);
     if (result == null) return;
