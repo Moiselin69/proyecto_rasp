@@ -1,19 +1,27 @@
+import os
+from PIL import Image
+import cv2
 import db
 from mysql.connector import Error
 from datetime import datetime
 from typing import Optional, Tuple, Any, List
 import shutil
 import utilidadesMetadatos
+import hashlib
 
 def procesar_archivo_local(id_usuario: int, ruta_fisica: str, nombre_original: str, tipo: str, fecha: Optional[datetime], id_album: Optional[int], reemplazar: bool) -> Tuple[bool, Any]:
-    """
-    Igual que subir_recurso, pero asume que el archivo ya existe físicamente en 'ruta_fisica'.
-    Se usa para los Chunked Uploads.
-    """
-    import os
-    from PIL import Image
-    import cv2
-    import shutil # Por si hay que mover
+    hash_archivo = None
+    try:
+        with open(ruta_fisica, "rb") as f:
+            file_bytes = f.read() 
+            hash_archivo = hashlib.sha256(file_bytes).hexdigest()
+        if not reemplazar:
+            id_duplicado = check_recurso_por_hash(id_usuario, hash_archivo)
+            if id_duplicado:
+                os.remove(ruta_fisica) # Borramos el temporal porque ya existe
+                return False, "DUPLICADO" # Esto lanzará el error 409
+    except Exception as e:
+        print(f"Error calculando hash: {e}")
     
     # 1. Verificar Cuota
     try:
@@ -667,46 +675,36 @@ def check_recurso_existe_en_album(id_usuario: int, nombre: str, id_album: Option
         if cursor: cursor.close()
         if connection and connection.is_connected(): connection.close()
 
-def reemplazar_recurso_simple(id_recurso: int, nuevo_enlace: str, nuevo_tipo: str, nuevo_tamano: int, nueva_fecha_real: Optional[datetime], id_usuario: int) -> Tuple[bool, Any]:
-    """
-    Actualiza el recurso existente con el nuevo archivo.
-    Devuelve (True, ruta_archivo_viejo) para poder borrarlo del disco.
-    """
+def reemplazar_recurso_simple(id_recurso: int, nuevo_enlace: str, nuevo_tipo: str, nuevo_tamano: int, nueva_fecha_real: Optional[datetime], id_usuario: int, nuevo_hash: str = None) -> Tuple[bool, Any]:
     connection = None
-    cursor = None
     try:
         connection = db.get_connection()
         connection.autocommit = False
         cursor = connection.cursor()
 
-        # 1. Obtener la ruta del archivo VIEJO para devolverla y borrarla luego
         cursor.execute("SELECT enlace FROM Recurso WHERE id = %s AND id_creador = %s", (id_recurso, id_usuario))
         resultado = cursor.fetchone()
         
         if not resultado:
             return False, "Recurso original no encontrado"
-            
         ruta_vieja = resultado[0]
 
-        # 2. Actualizar la tabla con los datos del NUEVO archivo (Incluyendo fecha_real)
+        # Actualizamos Hash también
         sql_update = """
             UPDATE Recurso 
-            SET enlace = %s, tipo = %s, tamano = %s, fecha_real = %s, fecha_subida = NOW(), fecha_eliminacion = NULL
+            SET enlace = %s, tipo = %s, tamano = %s, fecha_real = %s, hash_archivo = %s, fecha_subida = NOW(), fecha_eliminacion = NULL
             WHERE id = %s AND id_creador = %s
         """
-        cursor.execute(sql_update, (nuevo_enlace, nuevo_tipo, nuevo_tamano, nueva_fecha_real, id_recurso, id_usuario))
+        cursor.execute(sql_update, (nuevo_enlace, nuevo_tipo, nuevo_tamano, nueva_fecha_real, nuevo_hash, id_recurso, id_usuario))
         
         connection.commit()
-        
-        # Devolvemos éxito y la ruta vieja para que Python la borre del disco
         return True, ruta_vieja
 
     except Error as e:
         if connection: connection.rollback()
         return False, str(e)
     finally:
-        if cursor: cursor.close()
-        if connection and connection.is_connected(): connection.close()
+        if connection: connection.close()
 
 def mover_a_papelera_lote(ids: List[int], id_usuario: int) -> Tuple[bool, str]:
     """Mueve una lista de recursos a la papelera en una sola transacción."""

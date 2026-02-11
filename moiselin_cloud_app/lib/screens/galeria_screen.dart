@@ -17,6 +17,7 @@ import 'admin_screen.dart';
 import 'package:flutter/services.dart';
 import 'package:wechat_assets_picker/wechat_assets_picker.dart';
 import 'package:photo_manager/photo_manager.dart';
+import '../widgets/selector_fotos_propio.dart';
 
 class GaleriaScreen extends StatefulWidget {
   final String token;
@@ -609,16 +610,14 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
   }
 
   Future<void> _subirDesdeGaleria() async {
-    // 1. Selector de fotos
-    final List<AssetEntity>? assets = await AssetPicker.pickAssets(
+    final List<AssetEntity>? assets = await Navigator.push(
       context,
-      pickerConfig: const AssetPickerConfig(
-        maxAssets: 100, // Permitimos más fotos
-        requestType: RequestType.common,
-        textDelegate: SpanishAssetPickerTextDelegate(), // Tu traducción al español
+      MaterialPageRoute(
+        builder: (context) => const SelectorFotosPropio(maxSelection: 100),
+        fullscreenDialog: true, // Para que se abra como modal (con la X)
       ),
     );
-
+  
     if (assets == null || assets.isEmpty) return;
 
     // Verificar si el usuario tiene activado el "Borrar al subir"
@@ -626,7 +625,7 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
     
     // Lista para acumular los IDs de las fotos que se suban con éxito
     List<String> idsParaBorrar = []; 
-
+    int contadorDuplicados = 0;
     setState(() {
       _subiendo = true;
       _progreso = 0.0;
@@ -664,6 +663,9 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
       );
 
       // 3. Si se subió bien, AÑADIMOS A LA LISTA DE BORRADO (No borramos aún)
+      if (res == "DUPLICADO") {
+        contadorDuplicados++; // Contamos el duplicado  
+      }
       if (res != null && !res.contains("Error")) {
         if (borrarAlFinalizar) {
           idsParaBorrar.add(asset.id);
@@ -702,9 +704,18 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
       String mensajeFinal = idsParaBorrar.isNotEmpty 
           ? "Subida completa. Se han borrado los originales."
           : "Subida completa.";
+      Color colorFondo;
+      if (contadorDuplicados > 0) {
+        // Mensaje si hubo duplicados
+        int subidos = assets.length - contadorDuplicados;
+        mensajeFinal = "Finalizado: $subidos subidos, $contadorDuplicados eran duplicados.";
+        colorFondo = Colors.orange; // Color de advertencia
+      } else {
+        colorFondo = Colors.green;
+      }
           
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(mensajeFinal), backgroundColor: Colors.green),
+        SnackBar(content: Text(mensajeFinal), backgroundColor: colorFondo),
       );
     }
   }

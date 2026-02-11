@@ -15,100 +15,6 @@ import utilidadesMetadatos
 import hashlib
 router = APIRouter()
 
-#~Endpoint para subir recursos
-@router.post("/recurso/subir")
-async def subir_archivo(tipo: str = Form(...), fecha: Optional[datetime] = Form(None), file: UploadFile = File(...), id_album: Optional[str] = Form(None),reemplazar: bool = Form(False),current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
-    id_album_int = None # 1. Limpieza de id_album
-    if id_album and id_album.strip() != "" and id_album.lower() != "null":
-        try:
-            id_album_int = int(id_album)
-        except ValueError:
-            id_album_int = None
-    
-    contenido = await file.read() # Comprobacion de que no haya repetidos 
-    hash_archivo = hashlib.sha256(contenido).hexdigest()
-    await file.seek(0)
-    id_duplicado_por_contenido = consultasRecursos.check_recurso_por_hash(current_user_id, hash_archivo)
-    if id_duplicado_por_contenido and not reemplazar:
-        raise HTTPException(status_code=409, detail="Ya tienes un archivo con el mismo contenido (duplicado exacto)")
-    
-    id_existente = consultasRecursos.check_recurso_existe_en_album(current_user_id, file.filename, id_album_int)
-    if id_existente and not reemplazar: # 2. Verificar existencia y conflicto
-         raise HTTPException(status_code=409, detail="El archivo ya existe")
-    carpeta_original = "static/uploads" # 3. Guardar archivo físico
-    carpeta_miniatura = "static/thumbnails" 
-    os.makedirs(carpeta_original, exist_ok=True)
-    os.makedirs(carpeta_miniatura, exist_ok=True)
-    nombre_original, extension = os.path.splitext(file.filename)
-    nombre_archivo_fisico = f"{uuid.uuid4()}{extension}"
-    ruta_completa_original = os.path.join(carpeta_original, nombre_archivo_fisico)
-    with open(ruta_completa_original, "wb") as buffer: # Escribimos el archivo en disco
-        shutil.copyfileobj(file.file, buffer)
-    try:
-        tamano_archivo = os.path.getsize(ruta_completa_original)
-        puede_subir, mensaje_error = consultasRecursos.verificar_espacio_usuario(current_user_id, tamano_archivo)
-        if not puede_subir:
-            if os.path.exists(ruta_completa_original): 
-                os.remove(ruta_completa_original)
-            raise HTTPException(status_code=507, detail=mensaje_error)
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        if os.path.exists(ruta_completa_original): os.remove(ruta_completa_original)
-        raise HTTPException(status_code=500, detail=f"Error verificando cuota: {str(e)}")
-    metadatos_extraidos = None
-    if tipo in ["IMAGEN", "VIDEO"]:
-        metadatos_extraidos = utilidadesMetadatos.obtener_exif(ruta_completa_original)
-    try: # 4. Generar Miniaturas (Solo si pasó la prueba de espacio)
-        if tipo == "IMAGEN":
-            ruta_completa_miniatura = os.path.join(carpeta_miniatura, nombre_archivo_fisico)
-            with Image.open(ruta_completa_original) as img:
-                img.thumbnail((300, 300))
-                if img.mode in ("RGBA", "P"): img = img.convert("RGB")
-                img.save(ruta_completa_miniatura)
-        elif tipo == "VIDEO":
-            nombre_thumb = os.path.splitext(nombre_archivo_fisico)[0] + ".jpg" 
-            ruta_completa_miniatura = os.path.join(carpeta_miniatura, nombre_thumb)
-            cam = cv2.VideoCapture(ruta_completa_original) 
-            try:
-                cam.set(cv2.CAP_PROP_POS_FRAMES, 10)  
-                ret, frame = cam.read()
-                if not ret:
-                    cam.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                    ret, frame = cam.read()
-                if ret:
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) 
-                    with Image.fromarray(frame_rgb) as img:
-                        img.thumbnail((300, 300))
-                        img.save(ruta_completa_miniatura, format="JPEG")
-            finally:
-                cam.release()
-    except Exception as e:
-        print(f"Error creando miniatura: {e}") 
-    enlace_db = ruta_completa_original
-    if id_existente and reemplazar: # CASO A: REEMPLAZO
-        exito, resultado = consultasRecursos.reemplazar_recurso_simple(id_recurso=id_existente,nuevo_enlace=enlace_db,nuevo_tipo=tipo,nuevo_tamano=tamano_archivo, nueva_fecha_real=fecha,id_usuario=current_user_id)
-        if not exito:
-            if os.path.exists(ruta_completa_original): os.remove(ruta_completa_original)
-            raise HTTPException(status_code=500, detail=f"Error al reemplazar: {resultado}")
-        if resultado and resultado != enlace_db:
-             if os.path.exists(resultado): 
-                 try: os.remove(resultado) 
-                 except: pass
-        if exito:
-            if metadatos_extraidos:
-                consultasRecursos.guardar_metadatos(id_existente, metadatos_extraidos)
-        return {"mensaje": "Archivo reemplazado correctamente", "id_recurso": id_existente}
-    else: # CASO B: 
-        exito, id_recurso = consultasRecursos.subir_recurso(current_user_id, tipo, enlace_db, file.filename, tamano_archivo,fecha, id_album_int, hash_archivo)
-        if not exito:
-            if os.path.exists(ruta_completa_original): os.remove(ruta_completa_original)
-            raise HTTPException(status_code=500, detail=str(id_recurso))
-        if exito:
-            if metadatos_extraidos:
-                consultasRecursos.guardar_metadatos(id_recurso, metadatos_extraidos)
-        return {"mensaje": "Archivo subido correctamente", "id_recurso": id_recurso}
-
 #~Endpoint para comprobar que una carpeta no hay dos recursos que se llamen exactamente igual
 @router.get("/recurso/verificar-duplicado")
 def verificar_duplicado(nombre: str, id_album: Optional[int] = None, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
@@ -289,21 +195,27 @@ def complete_upload(
             try: id_album_int = int(id_album)
             except: pass
 
-        # 2. Procesar (BD, Cuota, Miniaturas)
+        # 2. Procesar (BD, Cuota, Miniaturas, Hash Check)
         exito, res = consultasRecursos.procesar_archivo_local(
             current_user_id, ruta_final, nombre_archivo, tipo, fecha, id_album_int, reemplazar
         )
 
         if not exito:
-            if res == "DUPLICADO": raise HTTPException(status_code=409, detail="El archivo ya existe")
-            # Si falló (ej: cuota), borramos el ensamblado
+            # Si es duplicado, lanzamos 409
+            if res == "DUPLICADO": 
+                raise HTTPException(status_code=409, detail="El archivo ya existe")
+            
+            # Si falló por otra razón (ej: cuota), borramos el ensamblado
             if os.path.exists(ruta_final): os.remove(ruta_final)
+            
             # Usamos 507 si es espacio, 500 si es otra cosa
             code = 507 if "cuota" in str(res).lower() or "espacio" in str(res).lower() else 500
             raise HTTPException(status_code=code, detail=str(res))
 
         return {"mensaje": "Subida completada exitosamente", "info": res}
 
+    except HTTPException as he:
+        raise he
     except Exception as e:
         print(f"Error completando subida: {e}")
         raise HTTPException(status_code=500, detail=str(e))

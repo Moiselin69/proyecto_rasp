@@ -4,16 +4,8 @@ import 'screens/login_screen.dart';
 import 'screens/galeria_screen.dart';
 import 'services/api_service.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:workmanager/workmanager.dart';
-import 'services/backup_service.dart.dart';
 
-@pragma('vm:entry-point') // Obligatorio para Android
-void callbackDispatcher() {
-  Workmanager().executeTask((task, inputData) async {
-    // Aquí llamaremos a la lógica de subida automática
-    return await BackupService.procesarCopiaSeguridad();
-  });
-}
+
 class MyHttpOverrides extends HttpOverrides {
   @override
   HttpClient createHttpClient(SecurityContext? context) {
@@ -24,8 +16,6 @@ class MyHttpOverrides extends HttpOverrides {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  Workmanager().initialize(callbackDispatcher, isInDebugMode: true);
-  Workmanager().registerPeriodicTask("1", "syncBackup",frequency: const Duration(minutes: 15),constraints: Constraints(networkType: NetworkType.connected,requiresBatteryNotLow: true,),);
   HttpOverrides.global = MyHttpOverrides();
   await ApiService.cargarUrl();
   runApp(MyApp());

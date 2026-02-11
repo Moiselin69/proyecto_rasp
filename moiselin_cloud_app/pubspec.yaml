@@ -31,7 +31,6 @@ dependencies:
     sdk: flutter
   file_picker: ^10.3.10
   flutter_secure_storage: ^10.0.0
-  workmanager: ^0.5.2
 
 dev_dependencies:
   flutter_test:
