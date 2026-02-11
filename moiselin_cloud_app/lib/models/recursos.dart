@@ -11,6 +11,7 @@ class Recurso {
   final String? nombreEmisor;
   final String? apellidosEmisor;
   final DateTime? fechaCompartido;
+  bool favorito;
 
   Recurso({
     required this.id,
@@ -25,6 +26,7 @@ class Recurso {
     this.nombreEmisor,
     this.apellidosEmisor,
     this.fechaCompartido,
+    this.favorito = false,
   });
 
   factory Recurso.fromJson(Map<String, dynamic> json) {
@@ -63,6 +65,7 @@ class Recurso {
       fechaCompartido: json['fecha_compartido'] != null
           ? DateTime.tryParse(json['fecha_compartido'].toString())
           : null,
+      favorito: json['favorito'] == 1 || json['favorito'] == true,
     );
   }
 

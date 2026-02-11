@@ -88,15 +88,15 @@ def procesar_archivo_local(id_usuario: int, ruta_fisica: str, nombre_original: s
             
         return exito, id_recurso
 
-def subir_recurso(id_creador: int, tipo: str, enlace: str, nombre: str, tamano: int, fecha_real: Optional[datetime] = None, id_album: Optional[int] = None) -> Tuple[bool, Any]:
+def subir_recurso(id_creador: int, tipo: str, enlace: str, nombre: str, tamano: int, hash_archivo: str, fecha_real: Optional[datetime] = None, id_album: Optional[int] = None ) -> Tuple[bool, Any]:
     connection = None
     try:
         connection = db.get_connection()
         connection.autocommit = False 
         if connection.is_connected():
             cursor = connection.cursor()
-            query_1 = "INSERT INTO Recurso (id_creador, tipo, enlace, nombre, tamano, fecha_real) VALUES(%s,%s,%s,%s,%s,%s)"
-            valores = (id_creador, tipo, enlace, nombre, tamano, fecha_real)
+            query_1 = "INSERT INTO Recurso (id_creador, tipo, enlace, nombre, tamano, fecha_real, hash_archivo) VALUES(%s,%s,%s,%s,%s,%s,%s)"
+            valores = (id_creador, tipo, enlace, nombre, tamano, fecha_real, hash_archivo)
             cursor.execute(query_1, valores)
             id_recurso = cursor.lastrowid
             if id_album is not None:
@@ -150,7 +150,7 @@ def obtener_recursos(id_persona:int):
         if connection.is_connected():
             cursor = connection.cursor(dictionary=True)
             query = """
-                SELECT r.id, r.tipo, r.nombre, r.fecha_real, r.fecha_subida, ra.id_album
+                SELECT r.id, r.tipo, r.nombre, r.fecha_real, r.fecha_subida, ra.id_album, r.favorito
                 FROM Recurso r 
                 JOIN Recurso_Persona rp ON r.id=rp.id_recurso 
                 LEFT JOIN Recurso_Album ra ON r.id = ra.id_recurso
@@ -913,3 +913,36 @@ def purgar_papelera_automatica(dias_retencion: int = 30):
     finally:
         if connection and connection.is_connected():
             connection.close()
+
+def marcar_favorito_bd(id_recurso: int, id_usuario: int, estado: bool):
+    connection = None
+    try:
+        connection = db.get_connection()
+        cursor = connection.cursor()
+        # Solo el creador puede marcar como favorito su recurso
+        sql = "UPDATE Recurso SET favorito = %s WHERE id = %s AND id_creador = %s"
+        cursor.execute(sql, (1 if estado else 0, id_recurso, id_usuario))
+        connection.commit()
+        
+        if cursor.rowcount > 0:
+            return True, "Estado de favorito actualizado"
+        return False, "No se encontró el recurso o no tienes permiso"
+    except Error as e:
+        return False, str(e)
+    finally:
+        if connection: connection.close()
+
+def check_recurso_por_hash(id_usuario, hash_archivo):
+    connection = None
+    try:
+        connection = db.get_connection()
+        cursor = connection.cursor(buffered=True)
+        # Buscamos si el usuario ya tiene este contenido subido y no está en la papelera
+        query = "SELECT id FROM Recurso WHERE id_creador = %s AND hash_archivo = %s AND fecha_eliminacion IS NULL LIMIT 1"
+        cursor.execute(query, (id_usuario, hash_archivo))
+        row = cursor.fetchone()
+        return row[0] if row else None
+    except:
+        return None
+    finally:
+        if connection: connection.close()

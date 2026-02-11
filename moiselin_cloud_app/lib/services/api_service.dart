@@ -712,4 +712,37 @@ class ApiService {
     }
   }
 
+  Future<bool> toggleFavorito(int idRecurso, bool estado) async {
+    final token = await getToken(); // Usando tu lógica de seguridad existente
+    final response = await http.put(
+      Uri.parse('$baseUrl/recurso/favorito'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+      body: jsonEncode({
+        'id_recurso': idRecurso,
+        'es_favorito': estado,
+      }),
+    );
+
+    return response.statusCode == 200;
+  }
+
+  Future<bool> subirRecursoAutomatico(File file, String tipo) async {
+    try {
+      final token = await getToken();
+      var request = http.MultipartRequest('POST', Uri.parse('$baseUrl/recurso/subir'));
+      request.headers['Authorization'] = 'Bearer $token';
+      request.fields['tipo'] = tipo.toUpperCase(); // IMAGEN o VIDEO
+      request.files.add(await http.MultipartFile.fromPath('file', file.path));
+
+      var response = await request.send();
+      return response.statusCode == 200;
+    } catch (e) {
+      print("Error en backup automático: $e");
+      return false;
+    }
+  }
+
 }

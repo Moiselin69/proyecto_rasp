@@ -59,13 +59,17 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
   Set<int> _recursosSeleccionados = {};
   Set<int> _albumesSeleccionados = {}; // Nuevo set para carpetas
 
-  final List<String> _categorias = ["Todos", "Imagen", "Videos", "Musica", "Otros"];
+  final List<String> _categorias = ["Todos", "Favoritos", "Imagen", "Videos", "Musica", "Otros"];
 
   @override
   void initState() {
     super.initState();
     _cargarDatos();
     _checkAdmin();
+  }
+
+  List<Recurso> get recursosFavoritos {
+    return _todosLosRecursos.where((recurso) => recurso.favorito).toList();
   }
 
   void _cargarDatos() async {
@@ -116,7 +120,7 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
     }
 
     // ---------------------------------------------------------
-    // 3. FILTRO DE FECHAS (NUEVO)
+    // 3. FILTRO DE FECHASS
     // ---------------------------------------------------------
     if (_rangoFechas != null) {
       // Normalizamos las fechas del rango para cubrir el día completo
@@ -154,6 +158,8 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
     // ---------------------------------------------------------
     if (_filtroSeleccionado != "Todos") {
       switch (_filtroSeleccionado) {
+        case "Favoritos":
+          listaRecursos = listaRecursos.where((r) => r.favorito == true).toList();
         case "Imagen":
           listaRecursos = listaRecursos.where((r) => r.tipo == "IMAGEN").toList();
           break;
@@ -883,6 +889,7 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
   void _aplicarFiltro(String categoria) {
     List<Recurso> temp;
     switch (categoria) {
+      case "Favoritos": temp = temp = _todosLosRecursos.where((r) => r.favorito == true).toList(); break;
       case "Imagen": temp = _todosLosRecursos.where((r) => r.tipo == "IMAGEN").toList(); break;
       case "Videos": temp = _todosLosRecursos.where((r) => r.tipo == "VIDEO").toList(); break;
       case "Musica": temp = _todosLosRecursos.where((r) => r.tipo == "AUDIO").toList(); break;
@@ -1400,8 +1407,6 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                           ),
                           itemCount: _albumesFiltrados.length + _recursosFiltrados.length,
                           itemBuilder: (context, index) {
-                             // ... (Tu código del itemBuilder sigue EXACTAMENTE IGUAL) ...
-                             // ... Copia aquí tu lógica de carpetas y recursos ...
                              if (index < _albumesFiltrados.length) {
                                return _buildCarpeta(_albumesFiltrados[index]);
                              } else {
@@ -1433,6 +1438,27 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                                            )
                                          : _getIconoArchivo(recurso),
                                      ),
+                                     Positioned(
+                                      top: 5,
+                                      left: 5,
+                                      child: GestureDetector(
+                                        onTap: () async {
+                                          // Llamada al API que creaste en el paso anterior
+                                          bool exito = await _apiService.toggleFavorito(recurso.id, !recurso.favorito);
+                                          if (exito) {
+                                            setState(() {
+                                              recurso.favorito = !recurso.favorito;
+                                              if (_filtroSeleccionado == "Favoritos") _aplicarFiltros(); // Refrescar si estamos en la vista de favoritos
+                                            });
+                                          }
+                                        },
+                                        child: Icon(
+                                          recurso.favorito ? Icons.favorite : Icons.favorite_border,
+                                          color: recurso.favorito ? Colors.red : Colors.white70,
+                                          size: 20,
+                                        ),
+                                      ),
+                                    ),
                                      if (recurso.tipo == "VIDEO")
                                        Center(child: Container(decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle), child: const Icon(Icons.play_arrow, color: Colors.white, size: 30))),
                                      if (_modoSeleccion)
@@ -1456,8 +1482,6 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
             ),
             ],
           ),
-
-          // CAPA 2: LA BARRA DE PROGRESO FLOTANTE (Solo visible si _subiendo es true)
           if (_subiendo)
             Positioned(
               bottom: 80,

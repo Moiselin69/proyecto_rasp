@@ -78,3 +78,7 @@ class CrearEnlace(BaseModel):
     ids_albumes: List[int] = []
     password: Optional[str] = None
     dias_expiracion: Optional[int] = None
+
+class RecursoFavorito(BaseModel):
+    id_recurso: int
+    es_favorito: bool

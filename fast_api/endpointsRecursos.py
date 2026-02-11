@@ -12,6 +12,7 @@ import modeloDatos
 import cv2
 import utilidadesFicheros
 import utilidadesMetadatos
+import hashlib
 router = APIRouter()
 
 #~Endpoint para subir recursos
@@ -23,6 +24,14 @@ async def subir_archivo(tipo: str = Form(...), fecha: Optional[datetime] = Form(
             id_album_int = int(id_album)
         except ValueError:
             id_album_int = None
+    
+    contenido = await file.read() # Comprobacion de que no haya repetidos 
+    hash_archivo = hashlib.sha256(contenido).hexdigest()
+    await file.seek(0)
+    id_duplicado_por_contenido = consultasRecursos.check_recurso_por_hash(current_user_id, hash_archivo)
+    if id_duplicado_por_contenido and not reemplazar:
+        raise HTTPException(status_code=409, detail="Ya tienes un archivo con el mismo contenido (duplicado exacto)")
+    
     id_existente = consultasRecursos.check_recurso_existe_en_album(current_user_id, file.filename, id_album_int)
     if id_existente and not reemplazar: # 2. Verificar existencia y conflicto
          raise HTTPException(status_code=409, detail="El archivo ya existe")
@@ -91,7 +100,7 @@ async def subir_archivo(tipo: str = Form(...), fecha: Optional[datetime] = Form(
                 consultasRecursos.guardar_metadatos(id_existente, metadatos_extraidos)
         return {"mensaje": "Archivo reemplazado correctamente", "id_recurso": id_existente}
     else: # CASO B: 
-        exito, id_recurso = consultasRecursos.subir_recurso(current_user_id, tipo, enlace_db, file.filename, tamano_archivo,fecha, id_album_int)
+        exito, id_recurso = consultasRecursos.subir_recurso(current_user_id, tipo, enlace_db, file.filename, tamano_archivo,fecha, id_album_int, hash_archivo)
         if not exito:
             if os.path.exists(ruta_completa_original): os.remove(ruta_completa_original)
             raise HTTPException(status_code=500, detail=str(id_recurso))
@@ -189,23 +198,12 @@ def responder_solicitud_recurso(datos: modeloDatos.RespuestaPeticionRecurso, cur
 
 #~Endpoint para editar el nombre de un recursos
 @router.put("/recurso/editar/nombre/{id_recurso}")
-def editar_nombre_recurso(
-    id_recurso: int, 
-    datos: modeloDatos.SolicitudNombre, 
-    current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)
-):
-    exito, res = consultasRecursos.renombrar_recurso_seguro(
-        id_recurso, 
-        datos.nombre, 
-        current_user_id, 
-        datos.reemplazar
-    )
-    
+def editar_nombre_recurso(id_recurso: int, datos: modeloDatos.SolicitudNombre, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+    exito, res = consultasRecursos.renombrar_recurso_seguro(id_recurso, datos.nombre, current_user_id, datos.reemplazar)
     if not exito:
         if res == "DUPLICADO":
             raise HTTPException(status_code=409, detail="El nombre ya existe")
         raise HTTPException(status_code=400, detail=str(res))
-        
     return {"mensaje": "Nombre actualizado"}
 
 @router.put("/recurso/editar/fecha/{id_recurso}")
@@ -339,3 +337,17 @@ def get_metadatos(id_recurso: int, current_user_id: int = Depends(funcionesSegur
     if not meta:
         return {} # Devuelve vacío si no tiene EXIF
     return meta
+
+@router.put("/recurso/favorito")
+def cambiar_favorito(
+    datos: modeloDatos.RecursoFavorito, 
+    current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)
+):
+    exito, msg = consultasRecursos.marcar_favorito_bd(
+        datos.id_recurso, 
+        current_user_id, 
+        datos.es_favorito
+    )
+    if not exito:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"mensaje": msg}

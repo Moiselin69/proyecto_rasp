@@ -45,6 +45,7 @@ CREATE TABLE Recurso(
 	fecha_eliminacion DATETIME DEFAULT NULL,
 	tamano BIGINT DEFAULT 0,
 	favorito BOOLEAN DEFAULT 0,
+	hash_archivo VARCHAR(64) NOT NULL,
 	CONSTRAINT pk_recurso PRIMARY KEY(id),
 	CONSTRAINT fk_recurso_creador FOREIGN KEY (id_creador) REFERENCES Persona(id) ON DELETE SET NULL
 )ENGINE=InnoDB;
