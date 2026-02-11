@@ -44,6 +44,7 @@ CREATE TABLE Recurso(
 	fecha_subida TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 	fecha_eliminacion DATETIME DEFAULT NULL,
 	tamano BIGINT DEFAULT 0,
+	favorito BOOLEAN DEFAULT 0,
 	CONSTRAINT pk_recurso PRIMARY KEY(id),
 	CONSTRAINT fk_recurso_creador FOREIGN KEY (id_creador) REFERENCES Persona(id) ON DELETE SET NULL
 )ENGINE=InnoDB;
