@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
-import 'galeria_screen.dart'; // Asegúrate de tener esta pantalla creada
+import '../services/persona_api.dart'; // <--- Nuevo servicio para login
+import 'galeria_screen.dart'; 
 
 class LoginScreen extends StatefulWidget {
+  const LoginScreen({Key? key}) : super(key: key);
+
   @override
   _LoginScreenState createState() => _LoginScreenState();
 }
@@ -11,7 +14,11 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-  final ApiService _apiService = ApiService();
+  
+  // Instanciamos los servicios
+  final ApiService _apiService = ApiService(); 
+  final PersonaApiService _personaApi = PersonaApiService(); // <--- Instancia para auth
+
   bool _isLoading = false;
   bool _isObscure = true;
 
@@ -23,91 +30,113 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _iniciarSesion() async {
+    if (!_formKey.currentState!.validate()) return;
+
     setState(() => _isLoading = true);
     
-    final email = _emailController.text;
-    final password = _passwordController.text;
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
 
-    // Usamos la nueva versión de login que devuelve el String del token
-    String? token = await _apiService.login(email, password);
+    try {
+      // 1. Llamamos al login usando PersonaApiService
+      String? token = await _personaApi.login(email, password);
 
-    if (token != null) {
-      // 1. SI EL LOGIN ES CORRECTO, GUARDAMOS TODO PERMANENTEMENTE
-      await _apiService.guardarSesion(email, password, token);
+      if (token != null) {
+        // 2. Si el login es correcto, guardamos sesión en ApiService
+        await _apiService.guardarSesion(email, password, token);
 
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => GaleriaScreen(token: token)),
-        );
+        if (mounted) {
+          // Navegamos a la galería pasando el token
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => GaleriaScreen(token: token)),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Credenciales incorrectas"),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
-    } else {
-      setState(() => _isLoading = false);
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Credenciales incorrectas o error de conexión")),
+          SnackBar(
+            content: Text("Error de conexión: $e"),
+            backgroundColor: Colors.red,
+          ),
         );
       }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   void _mostrarConfiguracionIP() {
-  // Controlador con la URL actual para que el usuario la vea
-  final ipController = TextEditingController(text: ApiService.baseUrl);
+    // Controlador con la URL actual
+    final ipController = TextEditingController(text: ApiService.baseUrl);
 
-  showDialog(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      title: Text("Configurar Servidor"),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text("Introduce la IP o Dominio de tu servidor (con puerto):"),
-          SizedBox(height: 10),
-          TextField(
-            controller: ipController,
-            decoration: InputDecoration(
-              labelText: "URL Base",
-              hintText: "http://192.168.1.X:8000",
-              border: OutlineInputBorder(),
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Configurar Servidor"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text("Introduce la IP o Dominio de tu servidor (con puerto):"),
+            const SizedBox(height: 10),
+            TextField(
+              controller: ipController,
+              decoration: const InputDecoration(
+                labelText: "URL Base",
+                hintText: "http://192.168.1.X:8000",
+                border: OutlineInputBorder(),
+              ),
+              keyboardType: TextInputType.url,
             ),
-            keyboardType: TextInputType.url,
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Cancelar"),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              if (ipController.text.isNotEmpty) {
+                // Guardamos la URL usando ApiService (método estático)
+                await ApiService.guardarUrl(ipController.text);
+                Navigator.pop(ctx);
+                
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text("Dirección actualizada a: ${ApiService.baseUrl}")),
+                );
+              }
+            },
+            child: const Text("Guardar"),
           ),
         ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(ctx),
-          child: Text("Cancelar"),
-        ),
-        ElevatedButton(
-          onPressed: () async {
-            if (ipController.text.isNotEmpty) {
-              await ApiService.guardarUrl(ipController.text);
-              Navigator.pop(ctx);
-              
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text("Dirección actualizada a: ${ApiService.baseUrl}"))
-              );
-            }
-          },
-          child: Text("Guardar"),
-        ),
-      ],
-    ),
-  );
-}
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text("Moiselin Cloud"),
+        title: const Text("Moiselin Cloud"),
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black,
+        elevation: 0,
         actions: [
-          // --- BOTÓN DE CONFIGURACIÓN ---
           IconButton(
-            icon: Icon(Icons.settings),
+            icon: const Icon(Icons.settings),
             onPressed: _mostrarConfiguracionIP,
+            tooltip: "Configurar IP",
           ),
         ],
       ),
@@ -123,24 +152,24 @@ class _LoginScreenState extends State<LoginScreen> {
                 children: [
                   // Icono / Logo
                   Container(
-                    padding: EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
                       color: Colors.blue.shade50,
                       shape: BoxShape.circle,
                     ),
-                    child: Icon(Icons.cloud_upload_rounded, size: 64, color: Colors.blue),
+                    child: const Icon(Icons.cloud_upload_rounded, size: 64, color: Colors.blue),
                   ),
-                  SizedBox(height: 24),
+                  const SizedBox(height: 24),
                   
-                  Text(
+                  const Text(
                     "Bienvenido",
                     style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.black87),
                   ),
-                  Text(
+                  const Text(
                     "Inicia sesión para ver tus fotos",
                     style: TextStyle(fontSize: 16, color: Colors.grey),
                   ),
-                  SizedBox(height: 32),
+                  const SizedBox(height: 32),
 
                   // Campo Email
                   TextFormField(
@@ -148,7 +177,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     keyboardType: TextInputType.emailAddress,
                     decoration: InputDecoration(
                       labelText: "Correo Electrónico",
-                      prefixIcon: Icon(Icons.email_outlined),
+                      prefixIcon: const Icon(Icons.email_outlined),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -161,7 +190,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       return null;
                     },
                   ),
-                  SizedBox(height: 16),
+                  const SizedBox(height: 16),
 
                   // Campo Contraseña
                   TextFormField(
@@ -169,7 +198,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     obscureText: _isObscure,
                     decoration: InputDecoration(
                       labelText: "Contraseña",
-                      prefixIcon: Icon(Icons.lock_outline),
+                      prefixIcon: const Icon(Icons.lock_outline),
                       suffixIcon: IconButton(
                         icon: Icon(_isObscure ? Icons.visibility_outlined : Icons.visibility_off_outlined),
                         onPressed: () => setState(() => _isObscure = !_isObscure),
@@ -185,7 +214,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       return null;
                     },
                   ),
-                  SizedBox(height: 24),
+                  const SizedBox(height: 24),
 
                   // Botón Login
                   SizedBox(
@@ -200,8 +229,8 @@ class _LoginScreenState extends State<LoginScreen> {
                         elevation: 2,
                       ),
                       child: _isLoading 
-                        ? SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                        : Text("Iniciar Sesión", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Text("Iniciar Sesión", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                     ),
                   ),
                 ],

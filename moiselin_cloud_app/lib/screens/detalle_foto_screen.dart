@@ -6,14 +6,17 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:path/path.dart' as path; // Importante para separar extensión
+import 'package:path/path.dart' as path; 
 
 import '../models/recursos.dart';
+import '../models/metadatos.dart';
 import '../services/api_service.dart';
 import '../services/download_service.dart';
+import '../services/recurso_api.dart'; // <--- Nuevo servicio
+import '../services/persona_api.dart'; // <--- Nuevo servicio
+
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import '../models/metadatos.dart';
 
 class DetalleRecursoScreen extends StatefulWidget {
   final Recurso recurso;
@@ -26,7 +29,9 @@ class DetalleRecursoScreen extends StatefulWidget {
 }
 
 class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
-  final ApiService _apiService = ApiService(); // Instancia para llamadas a la API
+  // Instancias de los nuevos servicios
+  final RecursoApiService _recursoApi = RecursoApiService();
+  final PersonaApiService _personaApi = PersonaApiService();
   final DownloadService _downloadService = DownloadService();
   
   // Variables locales para edición
@@ -132,11 +137,11 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
   }
 
   void _cargarMetadatos() async {
-    // 1. Optimización: Si no es una imagen, no perdemos tiempo buscando EXIF
+    // 1. Optimización: Si no es imagen o video, no buscamos EXIF
     if (widget.recurso.tipo != "IMAGEN" && widget.recurso.tipo != "VIDEO") return;
 
-    // 2. Llamada a la API
-    final datos = await _apiService.obtenerMetadatos(widget.token, widget.recurso.id);
+    // 2. Llamada a la API (El servicio gestiona el token internamente)
+    final datos = await _recursoApi.obtenerMetadatos(widget.recurso.id);
     
     // 3. Actualizar la interfaz
     if (mounted) {
@@ -167,7 +172,7 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
   Future<void> _inicializarVideo(String url) async {
     _videoPlayerController = VideoPlayerController.networkUrl(
       Uri.parse(url),
-      httpHeaders: {"Authorization": "Bearer ${widget.token}"},
+      httpHeaders: {"Authorization": "Bearer ${widget.token}"}, // El player necesita el token aquí explícitamente
     );
     try {
       await _videoPlayerController!.initialize();
@@ -195,11 +200,15 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
       if (mounted) setState(() => _position = p);
     });
     
+    // Para audios protegidos, AudioPlayer a veces necesita headers o un proxy.
+    // Si la URL es pública o el token va en query param funciona directo.
+    // Si no, considera usar UrlSource con headers si la librería lo soporta o descargar primero.
     _audioPlayer.setSourceUrl(url); 
   }
 
   Future<String> _cargarTexto(String url) async {
     try {
+      // Aquí seguimos usando http directo porque necesitamos el body raw
       final r = await http.get(Uri.parse(url), headers: {"Authorization": "Bearer ${widget.token}"});
       return r.statusCode == 200 ? r.body : "Error ${r.statusCode}";
     } catch (e) {
@@ -219,7 +228,7 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
             width: double.maxFinite,
             height: 300,
             child: FutureBuilder<List<dynamic>>(
-              future: ApiService.verAmigos(), // Asegúrate que sea static o usa _apiService.verAmigos()
+              future: _personaApi.obtenerAmistades(), // Usamos PersonaApiService
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
@@ -227,11 +236,15 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
                 if (snapshot.hasError) {
                   return Center(child: Text('Error: ${snapshot.error}'));
                 }
-                if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                  return const Center(child: Text('No tienes amigos para compartir.'));
+                
+                // Filtramos solo los que son AMIGOS (la API devuelve mezclado con solicitudes)
+                final listaCompleta = snapshot.data ?? [];
+                final amigos = listaCompleta.where((element) => element['estado'] == 'AMIGO').toList();
+
+                if (amigos.isEmpty) {
+                  return const Center(child: Text('No tienes amigos agregados para compartir.'));
                 }
 
-                final amigos = snapshot.data!;
                 return ListView.builder(
                   shrinkWrap: true,
                   itemCount: amigos.length,
@@ -243,10 +256,10 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
                         child: Text(amigo['nombre'][0].toUpperCase(), style: const TextStyle(color: Colors.white)),
                       ),
                       title: Text('${amigo['nombre']} ${amigo['apellidos'] ?? ''}'),
-                      subtitle: Text(amigo['correo_electronico']),
+                      subtitle: Text(amigo['nickname'] ?? ''),
                       onTap: () {
                         Navigator.pop(context);
-                        _enviarRecurso(amigo['id'], amigo['nombre']);
+                        _enviarRecurso(amigo['id']);
                       },
                     );
                   },
@@ -265,18 +278,25 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
     );
   }
 
-  Future<void> _enviarRecurso(int idAmigo, String nombreAmigo) async {
+  Future<void> _enviarRecurso(int idAmigo) async {
     try {
-      final int idRecurso = widget.recurso.id; 
-      String mensaje = await ApiService.compartirRecurso(idRecurso, idAmigo);
+      // Usamos RecursoApiService
+      final res = await _recursoApi.compartirRecurso(widget.recurso.id, idAmigo);
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(mensaje),
-            backgroundColor: mensaje.toLowerCase().contains('solicitud') ? Colors.orange : Colors.green,
-          ),
-        );
+        if (res['exito']) {
+           String mensaje = res['mensaje'];
+           ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(mensaje),
+              backgroundColor: mensaje.toLowerCase().contains('solicitud') ? Colors.orange : Colors.green,
+            ),
+          );
+        } else {
+           ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(res['mensaje'] ?? 'Error al compartir'), backgroundColor: Colors.red),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -292,7 +312,7 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
     if (directorioDestino == null) return;
 
     String urlCompleta = "${ApiService.baseUrl}${widget.recurso.urlVisualizacion}";
-    String nombreFinal = _nombreActual; // Usamos el nombre actual por si se editó
+    String nombreFinal = _nombreActual; 
 
     // Añadir extensión si falta
     if (path.extension(nombreFinal).isEmpty) {
@@ -304,6 +324,7 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
       }
     }
 
+    // DownloadService se mantiene igual
     String? resultado = await _downloadService.descargarYGuardar(
       urlCompleta,
       nombreFinal,
@@ -333,8 +354,8 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
     );
 
     if (confirm == true) {
-      // Usamos el servicio real para borrar (mover a papelera)
-      bool exito = await _apiService.borrarRecurso(widget.token, widget.recurso.id);
+      // Usamos RecursoApiService
+      bool exito = await _recursoApi.borrarRecurso(widget.recurso.id);
       
       if (exito && mounted) {
          ScaffoldMessenger.of(context).showSnackBar(
@@ -351,7 +372,6 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
 
   // --- LÓGICA DE RENOMBRADO SEGURA Y LIMITADA ---
   void _editarNombre() {
-    // 1. Separar nombre y extensión
     String extension = path.extension(_nombreActual); 
     String nombreSinExt = path.basenameWithoutExtension(_nombreActual);
 
@@ -421,9 +441,8 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
 
                     setStateDialog(() => cargando = true);
 
-                    // 1. INTENTO DE RENOMBRADO NORMAL
-                    int codigo = await _apiService.editarNombre(
-                        widget.token, 
+                    // 1. INTENTO DE RENOMBRADO (Usando RecursoApiService)
+                    int codigo = await _recursoApi.editarNombre(
                         widget.recurso.id, 
                         nuevoNombreCompleto, 
                         reemplazar: false
@@ -455,9 +474,9 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
 
                       if (reemplazar == true) {
                         setStateDialog(() => cargando = true);
+                        
                         // 3. REINTENTO CON REEMPLAZO FORZADO
-                        int cod2 = await _apiService.editarNombre(
-                            widget.token, 
+                        int cod2 = await _recursoApi.editarNombre(
                             widget.recurso.id, 
                             nuevoNombreCompleto, 
                             reemplazar: true
@@ -470,7 +489,7 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
                              const SnackBar(content: Text("Archivo reemplazado y renombrado")),
                            );
                         } else {
-                           Navigator.pop(context); // Cierra por seguridad
+                           Navigator.pop(context);
                            ScaffoldMessenger.of(context).showSnackBar(
                              const SnackBar(content: Text("Error al reemplazar el archivo")),
                            );
@@ -511,8 +530,8 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
       if (hora != null) {
         final nuevaFechaReal = DateTime(fecha.year, fecha.month, fecha.day, hora.hour, hora.minute);
         
-        // Llamada real al servicio
-        bool ok = await _apiService.editarFecha(widget.token, widget.recurso.id, nuevaFechaReal);
+        // Llamada usando RecursoApiService
+        bool ok = await _recursoApi.editarFecha(widget.recurso.id, nuevaFechaReal);
         
         if (ok) {
            setState(() => _fechaRealActual = nuevaFechaReal);
@@ -617,7 +636,7 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
     );
   }
 
-  // --- WIDGETS AUXILIARES (IGUAL QUE ANTES) ---
+  // --- WIDGETS AUXILIARES ---
 
   Widget _buildContenidoMultimedia() {
     final url = "${ApiService.baseUrl}${widget.recurso.urlVisualizacion}"; 

@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/recursos.dart';
 import '../services/api_service.dart';
-import 'detalle_foto_screen.dart'; // Importa tu pantalla de detalle
+import '../services/recurso_api.dart'; // <--- Importamos el nuevo servicio
+import 'detalle_foto_screen.dart'; 
 
 class CompartidosScreen extends StatelessWidget {
   const CompartidosScreen({Key? key}) : super(key: key);
@@ -41,6 +42,7 @@ class _ArchivosCompartidosTab extends StatefulWidget {
 }
 
 class _ArchivosCompartidosTabState extends State<_ArchivosCompartidosTab> {
+  final RecursoApiService _recursoApi = RecursoApiService(); // Instancia del servicio
   List<Recurso> _recursos = [];
   bool _isLoading = true;
   String? _token;
@@ -52,9 +54,12 @@ class _ArchivosCompartidosTabState extends State<_ArchivosCompartidosTab> {
   }
 
   Future<void> _cargarDatos() async {
+    // Obtenemos el token solo para las imágenes y la navegación posterior
     final token = await ApiService.getToken(); 
     try {
-      final lista = await ApiService.verCompartidosConmigo();
+      // Usamos el nuevo servicio (el token lo gestiona internamente para la petición)
+      final lista = await _recursoApi.verCompartidosConmigo();
+      
       if (mounted) {
         setState(() {
           _recursos = lista;
@@ -87,7 +92,7 @@ class _ArchivosCompartidosTabState extends State<_ArchivosCompartidosTab> {
 
         return GestureDetector(
           onTap: () {
-            // Navegar al detalle para ver/descargar
+            // Navegar al detalle
             if (_token != null) {
               Navigator.push(
                 context,
@@ -110,6 +115,19 @@ class _ArchivosCompartidosTabState extends State<_ArchivosCompartidosTab> {
                   shadows: const [Shadow(blurRadius: 2, color: Colors.black)],
                 ),
               ),
+              // Info del emisor (Opcional, pequeño indicador)
+              Positioned(
+                left: 2, bottom: 2,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(4)),
+                  child: Text(
+                    recurso.nombreEmisor ?? "Anon",
+                    style: const TextStyle(color: Colors.white, fontSize: 10),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              )
             ],
           ),
         );
@@ -126,7 +144,10 @@ class _ArchivosCompartidosTabState extends State<_ArchivosCompartidosTab> {
         errorWidget: (_, __, ___) => const Icon(Icons.broken_image),
       );
     } else {
-      return Container(color: Colors.grey[300], child: Icon(_getIconForType(r.tipo), size: 40, color: Colors.grey[700]));
+      return Container(
+        color: Colors.grey[300], 
+        child: Icon(_getIconForType(r.tipo), size: 40, color: Colors.grey[700])
+      );
     }
   }
 
@@ -149,6 +170,7 @@ class _SolicitudesRecursosTab extends StatefulWidget {
 }
 
 class _SolicitudesRecursosTabState extends State<_SolicitudesRecursosTab> {
+  final RecursoApiService _recursoApi = RecursoApiService(); // Instancia del servicio
   List<dynamic> _solicitudes = [];
   bool _isLoading = true;
 
@@ -160,23 +182,50 @@ class _SolicitudesRecursosTabState extends State<_SolicitudesRecursosTab> {
 
   Future<void> _cargar() async {
     try {
-      final lista = await ApiService.verSolicitudesRecursos();
+      // Usamos el nuevo método verPeticionesRecepcion
+      final lista = await _recursoApi.verPeticionesRecepcion();
       if (mounted) setState(() { _solicitudes = lista; _isLoading = false; });
     } catch (e) {
       if (mounted) setState(() => _isLoading = false);
+      print("Error cargando solicitudes: $e");
     }
   }
 
   Future<void> _responder(int index, bool aceptar) async {
     final s = _solicitudes[index];
     try {
-      await ApiService.responderSolicitudRecurso(s['id_emisor'], s['id_recurso'], aceptar);
+      // Usamos responderPeticionRecurso
+      // El backend devuelve keys: id_emisor, id_recurso, etc.
+      final res = await _recursoApi.responderPeticionRecurso(
+        s['id_emisor'], 
+        s['id_recurso'], 
+        aceptar
+      );
+
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(aceptar ? "Aceptado" : "Rechazado")));
-        _cargar(); // Recargar lista
+        if (res['exito']) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(aceptar ? "Solicitud aceptada" : "Solicitud rechazada"),
+              backgroundColor: Colors.green,
+            )
+          );
+          _cargar(); // Recargar lista
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(res['mensaje'] ?? "Error desconocido"),
+              backgroundColor: Colors.red
+            )
+          );
+        }
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error de conexión: $e"), backgroundColor: Colors.red)
+        );
+      }
     }
   }
 
@@ -198,8 +247,16 @@ class _SolicitudesRecursosTabState extends State<_SolicitudesRecursosTab> {
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                IconButton(icon: const Icon(Icons.check, color: Colors.green), onPressed: () => _responder(index, true)),
-                IconButton(icon: const Icon(Icons.close, color: Colors.red), onPressed: () => _responder(index, false)),
+                IconButton(
+                  icon: const Icon(Icons.check, color: Colors.green), 
+                  onPressed: () => _responder(index, true),
+                  tooltip: "Aceptar",
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, color: Colors.red), 
+                  onPressed: () => _responder(index, false),
+                  tooltip: "Rechazar",
+                ),
               ],
             ),
           ),

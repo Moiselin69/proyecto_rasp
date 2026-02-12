@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import '../services/api_service.dart';
+import '../services/api_service.dart'; // Para ApiService.baseUrl
+import '../services/recurso_api.dart'; // Nuevo servicio
 import '../models/recursos.dart';
 
 class PapeleraScreen extends StatefulWidget {
@@ -12,7 +13,7 @@ class PapeleraScreen extends StatefulWidget {
 }
 
 class _PapeleraScreenState extends State<PapeleraScreen> {
-  final ApiService _apiService = ApiService();
+  final RecursoApiService _recursoApi = RecursoApiService(); // Instancia del nuevo servicio
   bool _cargando = true;
   List<Recurso> _recursosPapelera = [];
   
@@ -29,7 +30,8 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
   void _cargarPapelera() async {
     setState(() => _cargando = true);
     try {
-      final lista = await _apiService.obtenerPapelera(widget.token);
+      // Usamos RecursoApiService (el token se gestiona internamente)
+      final lista = await _recursoApi.obtenerPapelera();
       if (mounted) {
         setState(() {
           _recursosPapelera = lista;
@@ -90,9 +92,11 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
 
     for (int id in ids) {
       if (esRestaurar) {
-        tareas.add(_apiService.restaurarRecurso(widget.token, id).then((ok) { if(ok) exitos++; }));
+        // Llamada a restaurar (sin token explicito)
+        tareas.add(_recursoApi.restaurarRecurso(id).then((ok) { if(ok) exitos++; }));
       } else {
-        tareas.add(_apiService.eliminarDefinitivo(widget.token, id).then((ok) { if(ok) exitos++; }));
+        // Llamada a eliminar definitivo (sin token explicito)
+        tareas.add(_recursoApi.eliminarDefinitivo(id).then((ok) { if(ok) exitos++; }));
       }
     }
 
@@ -237,9 +241,8 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
                         if (_modoSeleccion) {
                           _toggleSeleccion(r.id);
                         } else {
-                          // Si no hay modo selección, un tap simple podría mostrar detalles básicos
-                          // o preguntar qué hacer con ese archivo individual
-                          _toggleSeleccion(r.id); // Por defecto iniciamos selección
+                          // Por defecto iniciamos selección si no hay modo selección
+                          _toggleSeleccion(r.id); 
                         }
                       },
                       child: Card(
@@ -258,6 +261,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
                                   child: (r.esImagen || r.esVideo)
                                       ? CachedNetworkImage(
                                           imageUrl: urlThumb,
+                                          // Aquí SÍ necesitamos el token para la imagen, porque CachedNetworkImage hace su propia petición http
                                           httpHeaders: {"Authorization": "Bearer ${widget.token}"},
                                           fit: BoxFit.cover,
                                           errorWidget: (c, u, e) => _getIconoArchivo(r),

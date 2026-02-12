@@ -1,10 +1,15 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'screens/login_screen.dart';
-import 'screens/galeria_screen.dart';
-import 'services/api_service.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
+// --- PANTALLAS ---
+import 'screens/login_screen.dart';
+import 'screens/galeria_screen.dart';
+
+// --- SERVICIOS ---
+import 'services/api_service.dart';     // Configuración y Almacenamiento
+import 'services/persona_api.dart';     // Login
+import 'services/album_api.dart';       // Verificación de token (cargar datos)
 
 class MyHttpOverrides extends HttpOverrides {
   @override
@@ -17,7 +22,10 @@ class MyHttpOverrides extends HttpOverrides {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   HttpOverrides.global = MyHttpOverrides();
+  
+  // Cargamos la URL base guardada antes de arrancar la app
   await ApiService.cargarUrl();
+  
   runApp(MyApp());
 }
 
@@ -49,7 +57,10 @@ class CheckAuthScreen extends StatefulWidget {
 }
 
 class _CheckAuthScreenState extends State<CheckAuthScreen> {
-  final ApiService _apiService = ApiService();
+  // Instanciamos los servicios necesarios
+  final ApiService _apiService = ApiService();       // Para leer credenciales del disco
+  final PersonaApiService _personaApi = PersonaApiService(); // Para hacer login
+  final AlbumApiService _albumApi = AlbumApiService();       // Para probar si el token sirve
 
   @override
   void initState() {
@@ -58,6 +69,7 @@ class _CheckAuthScreenState extends State<CheckAuthScreen> {
   }
 
   void _checkSession() async {
+    // 1. Recuperar credenciales guardadas
     final session = await _apiService.obtenerSesion();
     final token = session['token'];
     final email = session['email'];
@@ -65,8 +77,9 @@ class _CheckAuthScreenState extends State<CheckAuthScreen> {
 
     if (token != null && email != null && password != null) {
       try {
-        // Probamos si el token sigue vivo
-        await _apiService.obtenerMisAlbumes(token);
+        // 2. Probar si el token sigue vivo intentando cargar datos (ej: álbumes)
+        // Nota: Pasamos el token explícitamente porque AlbumApi lo requería en tu código anterior
+        await _albumApi.obtenerMisAlbumes(token);
         
         if (mounted) {
           Navigator.pushReplacement(
@@ -76,23 +89,31 @@ class _CheckAuthScreenState extends State<CheckAuthScreen> {
           return;
         }
       } catch (e) {
-        print("Token caducado, re-logueando...");
-        // Si falla, intentamos login silencioso
-        String? newToken = await _apiService.login(email, password);
+        print("Token caducado o error de conexión, intentando re-loguear...");
         
-        if (newToken != null) {
-          await _apiService.guardarSesion(email, password, newToken);
-          if (mounted) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (_) => GaleriaScreen(token: newToken)),
-            );
-            return;
+        // 3. Si falla (401), intentamos login silencioso con PersonaApiService
+        try {
+          String? newToken = await _personaApi.login(email, password);
+          
+          if (newToken != null) {
+            // Guardamos el nuevo token
+            await _apiService.guardarSesion(email, password, newToken);
+            
+            if (mounted) {
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(builder: (_) => GaleriaScreen(token: newToken)),
+              );
+              return;
+            }
           }
+        } catch (loginError) {
+          print("Fallo el re-login: $loginError");
         }
       }
     }
 
+    // 4. Si no hay sesión o falló todo, vamos al Login
     if (mounted) {
       Navigator.pushReplacement(
         context,
@@ -103,7 +124,7 @@ class _CheckAuthScreenState extends State<CheckAuthScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return const Scaffold(
       body: Center(child: CircularProgressIndicator()),
     );
   }

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 
 class ConfiguracionScreen extends StatefulWidget {
-  const ConfiguracionScreen({super.key});
+  const ConfiguracionScreen({Key? key}) : super(key: key);
 
   @override
   State<ConfiguracionScreen> createState() => _ConfiguracionScreenState();
@@ -20,39 +20,57 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
   }
 
   Future<void> _cargarConfiguracion() async {
-    // 1. Cargamos la URL actual
+    // 1. Cargamos la URL actual (variable estática de ApiService)
     _urlController.text = ApiService.baseUrl;
     
-    // 2. Cargamos la preferencia de borrar
+    // 2. Cargamos la preferencia de borrar (asíncrona)
     final borrar = await ApiService.getBorrarAlSubir();
 
-    setState(() {
-      _borrarAlSubir = borrar;
-      _isLoading = false;
-    });
+    if (mounted) {
+      setState(() {
+        _borrarAlSubir = borrar;
+        _isLoading = false;
+      });
+    }
   }
 
   Future<void> _guardar() async {
-    if (_urlController.text.isEmpty) {
+    // Validación básica: quitamos espacios y comprobamos vacío
+    if (_urlController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('La URL no puede estar vacía')),
+        const SnackBar(content: Text('La URL no puede estar vacía'), backgroundColor: Colors.red),
       );
       return;
     }
 
     setState(() => _isLoading = true);
 
-    // Guardamos ambas cosas
-    await ApiService.guardarUrl(_urlController.text);
-    await ApiService.setBorrarAlSubir(_borrarAlSubir);
+    try {
+      // Guardamos la URL (Actualiza variable estática y SharedPreferences)
+      await ApiService.guardarUrl(_urlController.text.trim());
+      
+      // Guardamos la preferencia de borrado
+      await ApiService.setBorrarAlSubir(_borrarAlSubir);
 
-    setState(() => _isLoading = false);
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Configuración guardada correctamente')),
-      );
-      Navigator.pop(context); // Volvemos atrás
+      // Verificamos si el widget sigue montado antes de actualizar la UI
+      if (mounted) {
+        setState(() => _isLoading = false);
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Configuración guardada correctamente'), 
+            backgroundColor: Colors.green
+          ),
+        );
+        Navigator.pop(context); // Volvemos atrás
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al guardar: $e'), backgroundColor: Colors.red),
+        );
+      }
     }
   }
 
