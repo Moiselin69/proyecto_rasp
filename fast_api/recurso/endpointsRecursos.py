@@ -11,6 +11,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 UPLOADS_DIR = os.path.join(STATIC_DIR, "uploads")
 THUMBNAILS_DIR = os.path.join(STATIC_DIR, "thumbnails")
+from fastapi.responses import FileResponse
 router = APIRouter()
 
 #-----------------------------------------------------------------------------------------------------
@@ -242,6 +243,42 @@ def eliminar_recurso_definitivo(id_recurso: int, current_user_id: int = Depends(
             print(f"Error borrando archivos físicos (BD ya limpia): {e}")
     return {"mensaje": "Recurso eliminado permanentemente"}
 
+#---------------------------------------------------------------------------------------------------------
+#                                          SERVIR ARCHIVOS 
+#------------------------------------------------------------------------------------------------------------------
 
+@router.get("/recurso/archivo/{id_recurso}")
+def obtener_archivo_fisico(id_recurso: int, size: str = None, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+    # 1. Verificar permiso y obtener ruta de la BD
+    exito, res = consultasRecursos.obtener_recurso_por_id(id_recurso, current_user_id)
+    if not exito:
+        raise HTTPException(status_code=403, detail="Acceso denegado o recurso no encontrado")
+    
+    # 'res' es el diccionario con los datos. 'enlace' tiene la ruta física (ej: .../static/uploads/foto.jpg)
+    ruta_original = res['enlace']
+    
+    # 2. Lógica para servir miniatura si se pide (?size=small)
+    if size == "small":
+        # Calculamos la ruta de la miniatura basándonos en la del original
+        # Reemplazamos la carpeta 'uploads' por 'thumbnails' en la ruta
+        ruta_thumb = ruta_original.replace("uploads", "thumbnails")
+        
+        # Si es video, la miniatura es .jpg aunque el original sea .mp4
+        if res['tipo'] == 'VIDEO':
+             nombre_sin_ext = os.path.splitext(ruta_thumb)[0]
+             ruta_thumb = nombre_sin_ext + ".jpg"
+
+        if os.path.exists(ruta_thumb):
+            return FileResponse(ruta_thumb)
+        else:
+            # Si no hay miniatura, devolvemos original (si es imagen)
+            if res['tipo'] == 'IMAGEN':
+                 return FileResponse(ruta_original)
+    
+    # 3. Servir archivo original
+    if not os.path.exists(ruta_original):
+        raise HTTPException(status_code=404, detail="El archivo físico no existe en el servidor")
+
+    return FileResponse(ruta_original)
 
 

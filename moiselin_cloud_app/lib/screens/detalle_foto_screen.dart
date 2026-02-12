@@ -152,7 +152,7 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
   }
 
   void _inicializarRecurso() {
-    String urlCompleta = "${ApiService.baseUrl}${widget.recurso.urlVisualizacion}";
+    String urlCompleta = "${ApiService.baseUrl}/recurso/archivo/${widget.recurso.id}";
 
     switch (widget.recurso.tipo) {
       case "VIDEO":
@@ -639,20 +639,23 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
   // --- WIDGETS AUXILIARES ---
 
   Widget _buildContenidoMultimedia() {
-    final url = "${ApiService.baseUrl}${widget.recurso.urlVisualizacion}"; 
+    final url = "${ApiService.baseUrl}/recurso/archivo/${widget.recurso.id}";
     
     switch (widget.recurso.tipo) {
       case "IMAGEN":
         return InteractiveViewer(
           minScale: 0.5,
           maxScale: 4.0,
+          child: Hero(
+          tag: "recurso_${widget.recurso.id}",
           child: CachedNetworkImage(
             imageUrl: url,
             httpHeaders: {"Authorization": "Bearer ${widget.token}"},
             fit: BoxFit.contain,
-            placeholder: (context, url) => const CircularProgressIndicator(),
+            placeholder: (context, url) => const Center(child: CircularProgressIndicator(color: Colors.white)),
             errorWidget: (context, url, error) => const Icon(Icons.broken_image, color: Colors.white, size: 50),
           ),
+        ),
         );
       case "VIDEO":
         if (_chewieController != null && _videoPlayerController!.value.isInitialized) {

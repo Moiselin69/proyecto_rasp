@@ -8,8 +8,11 @@ from typing import Optional, Tuple, Any, List
 import shutil
 import fast_api.utilidades.utilidadesMetadatos as utilidadesMetadatos
 
-# ------------- CHECKEAR Y REMPLAZAR ARCHIVOS ---------------------------------
 
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+UPLOADS_DIR = os.path.join(STATIC_DIR, "uploads")
+THUMBNAILS_DIR = os.path.join(STATIC_DIR, "thumbnails")
 
 
 #-------------------------------------------------------------------------------------------------------
@@ -545,7 +548,7 @@ def procesar_archivo_local(id_usuario: int, ruta_fisica: str, nombre_original: s
         return False, "DUPLICADO" # Señal para error 409
 
     # 3. Generar Miniatura (Lógica reutilizada)
-    carpeta_miniatura = "static/thumbnails"
+    carpeta_miniatura = THUMBNAILS_DIR
     os.makedirs(carpeta_miniatura, exist_ok=True)
     nombre_fisico = os.path.basename(ruta_fisica)
     
@@ -644,7 +647,9 @@ def verificar_espacio_usuario(id_usuario: int, tamano_nuevo_archivo: int) -> Tup
         if not datos: return False, "Usuario no encontrado"
         limite_usuario = datos['almacenamiento_maximo'] # Puede ser None (Ilimitado)
         usado_usuario = datos['usado']
-        total, used, free = shutil.disk_usage("static/uploads")
+        if not os.path.exists(UPLOADS_DIR):
+            os.makedirs(UPLOADS_DIR, exist_ok=True)
+        total, used, free = shutil.disk_usage(UPLOADS_DIR)
         if tamano_nuevo_archivo > free:
             return False, "El servidor está lleno (Espacio físico agotado)."
         if limite_usuario is not None:

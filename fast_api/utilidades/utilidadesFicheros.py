@@ -20,7 +20,7 @@ def guardar_chunk(upload_id: str, index: int, file_bytes):
 
 def ensamblar_archivo(upload_id: str, nombre_final: str, total_chunks: int) -> str:
     temp_path = os.path.join(UPLOAD_TEMP_DIR, upload_id)
-    final_dir = "static/uploads"
+    final_dir = UPLOADS_DIR
     os.makedirs(final_dir, exist_ok=True)
     
     # Generar nombre único final (manteniendo extensión)

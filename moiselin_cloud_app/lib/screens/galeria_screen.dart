@@ -778,17 +778,37 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                                final urlImagen = "${ApiService.baseUrl}${recurso.urlThumbnail}";
                                
                                return GestureDetector(
-                                 onLongPress: () => _toggleSeleccionRecurso(recurso.id),
-                                 onTap: () { if (_modoSeleccion) { _toggleSeleccionRecurso(recurso.id); } else { Navigator.push(context, MaterialPageRoute(builder: (_) => DetalleRecursoScreen(recurso: recurso, token: widget.token))).then((_) => _cargarDatos()); } },
-                                 child: Stack(
-                                   fit: StackFit.expand,
-                                   children: [
-                                     ClipRRect(
-                                       borderRadius: BorderRadius.circular(12),
-                                       child: (recurso.esImagen || recurso.esVideo)
-                                         ? CachedNetworkImage(imageUrl: urlImagen, httpHeaders: {"Authorization": "Bearer ${widget.token}"}, fit: BoxFit.cover, placeholder: (context, url) => Container(color: Colors.grey[200]), errorWidget: (context, url, error) => const Icon(Icons.error))
-                                         : _getIconoArchivo(recurso),
-                                     ),
+                                onLongPress: () => _toggleSeleccionRecurso(recurso.id),
+                                onTap: () { 
+                                  if (_modoSeleccion) { 
+                                    _toggleSeleccionRecurso(recurso.id); 
+                                  } else { 
+                                    Navigator.push(context, MaterialPageRoute(builder: (_) => DetalleRecursoScreen(recurso: recurso, token: widget.token))).then((_) => _cargarDatos()); 
+                                  } 
+                                },
+                                child: Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: (recurso.esImagen || recurso.esVideo)
+                                        // 2. Envolvemos en Hero para la animación de transición
+                                        ? Hero(
+                                            tag: "recurso_${recurso.id}", // Tag único para conectar con la otra pantalla
+                                            child: CachedNetworkImage(
+                                              imageUrl: urlImagen,
+                                              // 3. IMPORTANTÍSIMO: El Token para que el backend acepte la petición
+                                              httpHeaders: {"Authorization": "Bearer ${widget.token}"},
+                                              fit: BoxFit.cover,
+                                              // 4. Optimización de memoria: Redimensionar en caché (crucial para listas largas)
+                                              memCacheHeight: 300, 
+                                              memCacheWidth: 300,
+                                              placeholder: (context, url) => Container(color: Colors.grey[200]),
+                                              errorWidget: (context, url, error) => const Icon(Icons.broken_image, color: Colors.grey),
+                                            ),
+                                          )
+                                        : _getIconoArchivo(recurso),
+                                    ),
                                      Positioned(
                                        top: 5, left: 5,
                                        child: GestureDetector(
