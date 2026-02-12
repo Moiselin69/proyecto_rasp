@@ -1,18 +1,16 @@
-import shutil
 import os
 import uuid
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Body
-from fastapi.responses import FileResponse
-from PIL import Image
 import fast_api.recurso.consultasRecursos as consultasRecursos
 import fast_api.seguridad.funcionesSeguridad as funcionesSeguridad
-import modeloDatosRecurso
-import cv2
+from fast_api.recurso import modeloDatosRecurso
 import fast_api.utilidades.utilidadesFicheros as utilidadesFicheros
-import fast_api.utilidades.utilidadesMetadatos as utilidadesMetadatos
-import hashlib
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+UPLOADS_DIR = os.path.join(STATIC_DIR, "uploads")
+THUMBNAILS_DIR = os.path.join(STATIC_DIR, "thumbnails")
 router = APIRouter()
 
 #-----------------------------------------------------------------------------------------------------

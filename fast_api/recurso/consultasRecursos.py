@@ -1,7 +1,7 @@
 import os
 from PIL import Image
 import cv2
-import db
+from fast_api import db
 from mysql.connector import Error
 from datetime import datetime
 from typing import Optional, Tuple, Any, List
@@ -601,15 +601,15 @@ def procesar_archivo_local(id_usuario: int, ruta_fisica: str, nombre_original: s
             
         return exito, id_recurso
 
-def subir_recurso(id_creador: int, tipo: str, enlace: str, nombre: str, tamano: int, hash_archivo: str, fecha_real: Optional[datetime] = None, id_album: Optional[int] = None ) -> Tuple[bool, Any]:
+def subir_recurso(id_creador: int, tipo: str, enlace: str, nombre: str, tamano: int, fecha_real: Optional[datetime] = None, id_album: Optional[int] = None ) -> Tuple[bool, Any]:
     connection = None
     try:
         connection = db.get_connection()
         connection.autocommit = False 
         if connection.is_connected():
             cursor = connection.cursor()
-            query_1 = "INSERT INTO Recurso (id_creador, tipo, enlace, nombre, tamano, fecha_real, hash_archivo) VALUES(%s,%s,%s,%s,%s,%s,%s)"
-            valores = (id_creador, tipo, enlace, nombre, tamano, fecha_real, hash_archivo)
+            query_1 = "INSERT INTO Recurso (id_creador, tipo, enlace, nombre, tamano, fecha_real) VALUES(%s,%s,%s,%s,%s,%s)"
+            valores = (id_creador, tipo, enlace, nombre, tamano, fecha_real)
             cursor.execute(query_1, valores)
             id_recurso = cursor.lastrowid
             if id_album is not None:
@@ -775,7 +775,7 @@ def revocar_todos_accesos_recurso(id_recurso: int, id_persona: int):
         if cursor: cursor.close()
         if connection and connection.is_connected(): connection.close()
 
-def reemplazar_recurso_simple(id_recurso: int, nuevo_enlace: str, nuevo_tipo: str, nuevo_tamano: int, nueva_fecha_real: Optional[datetime], id_usuario: int, nuevo_hash: str = None) -> Tuple[bool, Any]:
+def reemplazar_recurso_simple(id_recurso: int, nuevo_enlace: str, nuevo_tipo: str, nuevo_tamano: int, nueva_fecha_real: Optional[datetime], id_usuario: int) -> Tuple[bool, Any]:
     connection = None
     try:
         connection = db.get_connection()
@@ -795,7 +795,7 @@ def reemplazar_recurso_simple(id_recurso: int, nuevo_enlace: str, nuevo_tipo: st
             SET enlace = %s, tipo = %s, tamano = %s, fecha_real = %s, hash_archivo = %s, fecha_subida = NOW(), fecha_eliminacion = NULL
             WHERE id = %s AND id_creador = %s
         """
-        cursor.execute(sql_update, (nuevo_enlace, nuevo_tipo, nuevo_tamano, nueva_fecha_real, nuevo_hash, id_recurso, id_usuario))
+        cursor.execute(sql_update, (nuevo_enlace, nuevo_tipo, nuevo_tamano, nueva_fecha_real, id_recurso, id_usuario))
         
         connection.commit()
         return True, ruta_vieja

@@ -1,4 +1,4 @@
-import db
+from fast_api import db
 from mysql.connector import Error
 import shutil 
 

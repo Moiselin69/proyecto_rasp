@@ -10,6 +10,10 @@ import fast_api.recurso.endpointsEnlaces as endpointsEnlaces
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from contextlib import asynccontextmanager
 import fast_api.recurso.consultasRecursos as consultasRecursos
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     scheduler = AsyncIOScheduler()
@@ -24,10 +28,9 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
-if not os.path.exists("static"):
-    os.makedirs("static")
-
-app.mount("/static", StaticFiles(directory="static"), name="static")
+if not os.path.exists(STATIC_DIR):
+    os.makedirs(STATIC_DIR)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 origins = ["*"]
 app.add_middleware(
     CORSMiddleware,
@@ -44,4 +47,4 @@ app.include_router(endpointsEnlaces.router)
 def home():
     return {"mensaje": "Bienvenido a la API de MoiselinCloud. Todo funciona correctamente."}
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, ssl_keyfile="key.pem", ssl_certfile="cert.pem")
+    uvicorn.run("fast_api.main:app", host="0.0.0.0", port=8000, reload=True, ssl_keyfile="key.pem", ssl_certfile="cert.pem")

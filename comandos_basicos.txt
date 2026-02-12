@@ -1,0 +1,1 @@
+UPDATE Persona SET rol = 'ADMINISTRADOR' WHERE correo_electronico = 'a@test.com';

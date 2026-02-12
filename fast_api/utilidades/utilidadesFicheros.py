@@ -1,7 +1,10 @@
 import os
 import shutil
 
-UPLOAD_TEMP_DIR = "static/temp_chunks"
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) 
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+UPLOAD_TEMP_DIR = os.path.join(STATIC_DIR, "temp_chunks")
+UPLOADS_DIR = os.path.join(STATIC_DIR, "uploads")
 
 def iniciar_carga_chunk(upload_id: str):
     path = os.path.join(UPLOAD_TEMP_DIR, upload_id)

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 import fast_api.album.consultasAlbum as consultasAlbum
 import fast_api.seguridad.funcionesSeguridad as funcionesSeguridad
-import modeloDatosAlbum
+from fast_api.album import modeloDatosAlbum
 import os
 router = APIRouter()
 

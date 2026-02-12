@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Form
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 import secrets
-import db
+from fast_api import db
 from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel
@@ -11,7 +11,7 @@ import os
 import zipfile
 import io
 from fastapi.responses import StreamingResponse
-import modeloDatosRecurso
+from fast_api.recurso import modeloDatosRecurso
 
 
 router = APIRouter()

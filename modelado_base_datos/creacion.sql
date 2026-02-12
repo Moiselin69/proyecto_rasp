@@ -1,121 +1,134 @@
+/* ==========================================================
+   ORDEN DE BORRADO (Hijos primero para evitar errores de FK)
+   ========================================================== */
 DROP TRIGGER IF EXISTS borrar_recurso_huerfano;
-DROP TABLE IF EXISTS Peticion_Amistad;
+
+-- Tablas dependientes de Recurso, Album o Persona
+DROP TABLE IF EXISTS Metadatos;
+DROP TABLE IF EXISTS EnlacePublico_Contenido;
+DROP TABLE IF EXISTS EnlacePublico;
+DROP TABLE IF EXISTS Recurso_Compartido;
 DROP TABLE IF EXISTS Peticion_Recurso;
-DROP TABLE IF EXISTS Peticion_Album;
-DROP TABLE IF EXISTS Persona_Amiga; 
 DROP TABLE IF EXISTS Recurso_Album;
-DROP TABLE IF EXISTS Miembro_Album;
 DROP TABLE IF EXISTS Recurso_Persona;
-DROP TABLe IF EXISTS Control_Acceso;
-DROP TABLE IF EXISTS Recurso;
+
+-- Tablas dependientes de Album o Persona
+DROP TABLE IF EXISTS Peticion_Album;
+DROP TABLE IF EXISTS Miembro_Album;
 DROP TABLE IF EXISTS Album;
+
+-- Tablas de Relación de Personas y Seguridad
+DROP TABLE IF EXISTS Amistad; -- Unificada (antes Peticion_Amistad y Persona_Amiga)
+DROP TABLE IF EXISTS Control_Acceso;
+
+-- Tablas Principales
+DROP TABLE IF EXISTS Recurso;
 DROP TABLE IF EXISTS Persona;
 
 
-CREATE TABLE Persona(
-	id INT AUTO_INCREMENT,
-	correo_electronico VARCHAR(320) NOT NULL UNIQUE,
-	contra_hash VARCHAR(320) NOT NULL,
-	nombre VARCHAR(100) NOT NULL,
-	apellidos VARCHAR(100),
-	fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-	fecha_eliminacion DATETIME DEFAULT NULL,
-	rol ENUM('USUARIO', 'ADMINISTRADOR') DEFAULT 'USUARIO',
-	almacenamiento_maximo BIGINT DEFAULT NULL,
-	CONSTRAINT pk_id PRIMARY KEY (id)
-)ENGINE=InnoDB;
+/* ==========================================================
+   CREACIÓN DE TABLAS
+   ========================================================== */
 
-CREATE TABLE Persona_Amiga(
-	id_persona_1 INT NOT NULL,
-	id_persona_2 INT NOT NULL,
-	CONSTRAINT pk_persona_amiga PRIMARY KEY(id_persona_1, id_persona_2),
-	CONSTRAINT fk_persona_amiga_1 FOREIGN KEY(id_persona_1) REFERENCES Persona(id) ON DELETE CASCADE,
-	CONSTRAINT fk_persona_amiga_2 FOREIGN KEY(id_persona_2) REFERENCES Persona(id) ON DELETE CASCADE,
-	CONSTRAINT chk_no_auto_amistad CHECK (id_persona_1 <> id_persona_2)
-)ENGINE=InnoDB;
+CREATE TABLE Persona(
+    id INT AUTO_INCREMENT,
+    correo_electronico VARCHAR(320) NOT NULL UNIQUE,
+    contrasena VARCHAR(320) NOT NULL, -- Corregido: Coincide con consultasPersona.py
+    nombre VARCHAR(100) NOT NULL,
+    apellidos VARCHAR(100),
+    nickname VARCHAR(50) UNIQUE,      -- Añadido: Se usa en registro y búsquedas
+    fecha_nacimiento DATE,            -- Añadido: Se usa en registro
+    fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    fecha_eliminacion DATETIME DEFAULT NULL,
+    rol ENUM('USUARIO', 'ADMINISTRADOR') DEFAULT 'USUARIO',
+    almacenamiento_maximo BIGINT DEFAULT NULL, -- NULL = Ilimitado
+    CONSTRAINT pk_id PRIMARY KEY (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE Amistad(
+    id_persona1 INT NOT NULL,
+    id_persona2 INT NOT NULL,
+    estado ENUM('PENDIENTE', 'ACEPTADA') DEFAULT 'PENDIENTE',
+    fecha_accion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_amistad PRIMARY KEY(id_persona1, id_persona2),
+    CONSTRAINT fk_amistad_1 FOREIGN KEY(id_persona1) REFERENCES Persona(id) ON DELETE CASCADE,
+    CONSTRAINT fk_amistad_2 FOREIGN KEY(id_persona2) REFERENCES Persona(id) ON DELETE CASCADE,
+    CONSTRAINT chk_no_auto_amistad CHECK (id_persona1 <> id_persona2)
+) ENGINE=InnoDB;
 
 CREATE TABLE Recurso(
-	id INT AUTO_INCREMENT NOT NULL,
-	id_creador INT,
-	tipo ENUM ('IMAGEN','VIDEO','AUDIO','ARCHIVO') NOT NULL,
-	enlace VARCHAR(320) NOT NULL,
-	nombre VARCHAR(100),
-	fecha_real DATETIME,
-	fecha_subida TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-	fecha_eliminacion DATETIME DEFAULT NULL,
-	tamano BIGINT DEFAULT 0,
-	favorito BOOLEAN DEFAULT 0,
-	hash_archivo VARCHAR(64) NOT NULL,
-	CONSTRAINT pk_recurso PRIMARY KEY(id),
-	CONSTRAINT fk_recurso_creador FOREIGN KEY (id_creador) REFERENCES Persona(id) ON DELETE SET NULL
-)ENGINE=InnoDB;
+    id INT AUTO_INCREMENT NOT NULL,
+    id_creador INT,
+    tipo ENUM ('IMAGEN','VIDEO','AUDIO','ARCHIVO') NOT NULL,
+    enlace VARCHAR(320) NOT NULL,
+    nombre VARCHAR(100),
+    fecha_real DATETIME,
+    fecha_subida TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    fecha_eliminacion DATETIME DEFAULT NULL,
+    tamano BIGINT DEFAULT 0,
+    favorito BOOLEAN DEFAULT 0,
+    CONSTRAINT pk_recurso PRIMARY KEY(id),
+    CONSTRAINT fk_recurso_creador FOREIGN KEY (id_creador) REFERENCES Persona(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
 
 CREATE TABLE Recurso_Persona(
-	id_recurso INT NOT NULL,
-	id_persona INT NOT NULL,
-	CONSTRAINT pk_recurso_persona PRIMARY KEY(id_recurso, id_persona),
-	CONSTRAINT fk_recurso_persona_recurso FOREIGN KEY(id_recurso) REFERENCES Recurso(id) ON DELETE CASCADE,
-	CONSTRAINT fk_recurso_persona_persona FOREIGN KEY(id_persona) REFERENCES Persona(id) ON DELETE CASCADE
-)ENGINE=InnoDB;
+    id_recurso INT NOT NULL,
+    id_persona INT NOT NULL,
+    CONSTRAINT pk_recurso_persona PRIMARY KEY(id_recurso, id_persona),
+    CONSTRAINT fk_recurso_persona_recurso FOREIGN KEY(id_recurso) REFERENCES Recurso(id) ON DELETE CASCADE,
+    CONSTRAINT fk_recurso_persona_persona FOREIGN KEY(id_persona) REFERENCES Persona(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
 
 CREATE TABLE Album(
-	id INT AUTO_INCREMENT,
-	nombre VARCHAR(100) NOT NULL,
-	descripcion VARCHAR(300),
-	id_album_padre INT NULL,
-	fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-	CONSTRAINT pk_album PRIMARY KEY(id),
-	CONSTRAINT fk_album_padre FOREIGN KEY(id_album_padre) REFERENCES Album(id) ON DELETE CASCADE
-)ENGINE=InnoDB;
+    id INT AUTO_INCREMENT,
+    nombre VARCHAR(100) NOT NULL,
+    descripcion VARCHAR(300),
+    id_album_padre INT NULL,
+    fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_album PRIMARY KEY(id),
+    CONSTRAINT fk_album_padre FOREIGN KEY(id_album_padre) REFERENCES Album(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
 
 CREATE TABLE Miembro_Album(
-	id_album INT NOT NULL,
-	id_persona INT NOT NULL,
-	rol ENUM('CREADOR', 'ADMINISTRADOR', 'COLABORADOR') NOT NULL DEFAULT 'COLABORADOR',
-	fecha_union TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-	CONSTRAINT pk_miembro_album PRIMARY KEY(id_album, id_persona),
-	CONSTRAINT fk_miembro_album_album FOREIGN KEY(id_album) REFERENCES Album(id) ON DELETE CASCADE,
-	CONSTRAINT fk_miembro_album_persona FOREIGN KEY(id_persona) REFERENCES Persona(id) ON DELETE CASCADE
-)ENGINE=InnoDB;
+    id_album INT NOT NULL,
+    id_persona INT NOT NULL,
+    rol ENUM('CREADOR', 'ADMINISTRADOR', 'COLABORADOR') NOT NULL DEFAULT 'COLABORADOR',
+    fecha_union TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_miembro_album PRIMARY KEY(id_album, id_persona),
+    CONSTRAINT fk_miembro_album_album FOREIGN KEY(id_album) REFERENCES Album(id) ON DELETE CASCADE,
+    CONSTRAINT fk_miembro_album_persona FOREIGN KEY(id_persona) REFERENCES Persona(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
 
 CREATE TABLE Recurso_Album(
-	id_album INT NOT NULL,
-	id_recurso INT NOT NULL,
-	CONSTRAINT pk_recurso_album PRIMARY KEY(id_album, id_recurso),
-	CONSTRAINT fk_recurso_album_album FOREIGN KEY(id_album) REFERENCES Album(id) ON DELETE CASCADE,
-	CONSTRAINT fk_recurso_album_recurso FOREIGN KEY(id_recurso) REFERENCES Recurso(id) ON DELETE CASCADE
-)ENGINE=InnoDB;
-
-CREATE TABLE Peticion_Amistad(
-	id_persona INT NOT NULL,
-	id_persona_solicitada INT NOT NULL,
-	CONSTRAINT pk_peticion_amistad PRIMARY KEY(id_persona,id_persona_solicitada),
-	CONSTRAINT fk_peticion_amistad_persona FOREIGN KEY(id_persona) REFERENCES Persona(id) ON DELETE CASCADE,
-	CONSTRAINT fk_peticion_amistad_persona_solicitada FOREIGN KEY(id_persona_solicitada) REFERENCES Persona(id) ON DELETE CASCADE
-)ENGINE=InnoDB;
+    id_album INT NOT NULL,
+    id_recurso INT NOT NULL,
+    CONSTRAINT pk_recurso_album PRIMARY KEY(id_album, id_recurso),
+    CONSTRAINT fk_recurso_album_album FOREIGN KEY(id_album) REFERENCES Album(id) ON DELETE CASCADE,
+    CONSTRAINT fk_recurso_album_recurso FOREIGN KEY(id_recurso) REFERENCES Recurso(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
 
 CREATE TABLE Peticion_Album(
-	id_persona INT NOT NULL,
-	id_persona_compartida INT NOT NULL,
-	id_album INT NOT NULL,
-	rol ENUM('CREADOR', 'ADMINISTRADOR', 'COLABORADOR') NOT NULL DEFAULT 'COLABORADOR',
-	CONSTRAINT pk_peticion_album PRIMARY KEY(id_persona,id_persona_compartida,id_album),
-	CONSTRAINT fk_peticion_album_persona FOREIGN KEY(id_persona) REFERENCES Persona(id) ON DELETE CASCADE,
-	CONSTRAINT fk_peticion_album_persona_compartida FOREIGN KEY(id_persona_compartida) REFERENCES Persona(id) ON DELETE CASCADE,
-	CONSTRAINT fk_peticion_album_album FOREIGN KEY(id_album) REFERENCES Album(id) ON DELETE CASCADE
-)ENGINE=InnoDB;
+    id_persona INT NOT NULL,
+    id_persona_compartida INT NOT NULL,
+    id_album INT NOT NULL,
+    rol ENUM('CREADOR', 'ADMINISTRADOR', 'COLABORADOR') NOT NULL DEFAULT 'COLABORADOR',
+    CONSTRAINT pk_peticion_album PRIMARY KEY(id_persona,id_persona_compartida,id_album),
+    CONSTRAINT fk_peticion_album_persona FOREIGN KEY(id_persona) REFERENCES Persona(id) ON DELETE CASCADE,
+    CONSTRAINT fk_peticion_album_compartida FOREIGN KEY(id_persona_compartida) REFERENCES Persona(id) ON DELETE CASCADE,
+    CONSTRAINT fk_peticion_album_album FOREIGN KEY(id_album) REFERENCES Album(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
 
 CREATE TABLE Peticion_Recurso(
-	id_persona INT NOT NULL,
-	id_persona_compartida INT NOT NULL,
-	id_recurso INT NOT NULL,
-	estado ENUM('PENDIENTE', 'ACEPTADA', 'RECHAZADA') DEFAULT 'PENDIENTE',
-	fecha_solicitud DATETIME DEFAULT CURRENT_TIMESTAMP,
-	CONSTRAINT pk_peticion_recurso PRIMARY KEY(id_persona,id_persona_compartida,id_recurso),
-	CONSTRAINT fk_peticion_recurso_persona FOREIGN KEY(id_persona) REFERENCES Persona(id) ON DELETE CASCADE,
-	CONSTRAINT fk_peticion_recurso_persona_compartida FOREIGN KEY(id_persona_compartida) REFERENCES Persona(id) ON DELETE CASCADE,
-	CONSTRAINT fk_peticion_recurso_recurso FOREIGN KEY(id_recurso) REFERENCES Recurso(id) ON DELETE CASCADE
-)ENGINE=InnoDB;
+    id_persona INT NOT NULL,
+    id_persona_compartida INT NOT NULL,
+    id_recurso INT NOT NULL,
+    estado ENUM('PENDIENTE', 'ACEPTADA', 'RECHAZADA') DEFAULT 'PENDIENTE',
+    fecha_solicitud DATETIME DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_peticion_recurso PRIMARY KEY(id_persona,id_persona_compartida,id_recurso),
+    CONSTRAINT fk_peticion_recurso_persona FOREIGN KEY(id_persona) REFERENCES Persona(id) ON DELETE CASCADE,
+    CONSTRAINT fk_peticion_recurso_compartida FOREIGN KEY(id_persona_compartida) REFERENCES Persona(id) ON DELETE CASCADE,
+    CONSTRAINT fk_peticion_recurso_recurso FOREIGN KEY(id_recurso) REFERENCES Recurso(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
 
 CREATE TABLE Control_Acceso (
     ip VARCHAR(45) NOT NULL,
@@ -146,9 +159,9 @@ CREATE TABLE EnlacePublico (
     fecha_expiracion DATETIME NULL,
     password_hash VARCHAR(255) NULL,
     veces_usado INT DEFAULT 0,
-    FOREIGN KEY (id_recurso) REFERENCES Recurso(id) ON DELETE CASCADE,
-    FOREIGN KEY (id_album) REFERENCES Album(id) ON DELETE CASCADE,
-    FOREIGN KEY (id_creador) REFERENCES Persona(id) ON DELETE CASCADE
+    CONSTRAINT fk_enlace_recurso FOREIGN KEY (id_recurso) REFERENCES Recurso(id) ON DELETE CASCADE,
+    CONSTRAINT fk_enlace_album FOREIGN KEY (id_album) REFERENCES Album(id) ON DELETE CASCADE,
+    CONSTRAINT fk_enlace_creador FOREIGN KEY (id_creador) REFERENCES Persona(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 CREATE TABLE EnlacePublico_Contenido (
@@ -156,23 +169,23 @@ CREATE TABLE EnlacePublico_Contenido (
     id_enlace INT NOT NULL,
     id_recurso INT NULL,
     id_album INT NULL,
-    FOREIGN KEY (id_enlace) REFERENCES EnlacePublico(id) ON DELETE CASCADE,
-    FOREIGN KEY (id_recurso) REFERENCES Recurso(id) ON DELETE CASCADE,
-    FOREIGN KEY (id_album) REFERENCES Album(id) ON DELETE CASCADE
+    CONSTRAINT fk_contenido_enlace FOREIGN KEY (id_enlace) REFERENCES EnlacePublico(id) ON DELETE CASCADE,
+    CONSTRAINT fk_contenido_recurso FOREIGN KEY (id_recurso) REFERENCES Recurso(id) ON DELETE CASCADE,
+    CONSTRAINT fk_contenido_album FOREIGN KEY (id_album) REFERENCES Album(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 CREATE TABLE Metadatos (
     id INT AUTO_INCREMENT PRIMARY KEY,
     id_recurso INT NOT NULL,
-    dispositivo VARCHAR(100) NULL, -- Ej: iPhone 13
+    dispositivo VARCHAR(100) NULL,
     iso INT NULL,
-    apertura VARCHAR(20) NULL, -- Ej: f/1.8
-    velocidad VARCHAR(20) NULL, -- Ej: 1/60
+    apertura VARCHAR(20) NULL,
+    velocidad VARCHAR(20) NULL,
     latitud DECIMAL(10, 8) NULL,
     longitud DECIMAL(11, 8) NULL,
     ancho INT NULL,
     alto INT NULL,
-    FOREIGN KEY (id_recurso) REFERENCES Recurso(id) ON DELETE CASCADE
+    CONSTRAINT fk_metadatos_recurso FOREIGN KEY (id_recurso) REFERENCES Recurso(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 DELIMITER //
