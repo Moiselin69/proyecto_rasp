@@ -3,13 +3,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 import os
-import endpointsPersona
-import endpointsAlbum
-import endpointsRecursos
-import endpointsEnlaces
+import fast_api.persona.endpointsPersona as endpointsPersona
+import fast_api.album.endpointsAlbum as endpointsAlbum
+import fast_api.recurso.endpointsRecursos as endpointsRecursos
+import fast_api.recurso.endpointsEnlaces as endpointsEnlaces
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from contextlib import asynccontextmanager
-import consultasRecursos
+import fast_api.recurso.consultasRecursos as consultasRecursos
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     scheduler = AsyncIOScheduler()
