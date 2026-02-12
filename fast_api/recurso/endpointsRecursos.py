@@ -250,6 +250,7 @@ def eliminar_recurso_definitivo(id_recurso: int, current_user_id: int = Depends(
 @router.get("/recurso/archivo/{id_recurso}")
 def obtener_archivo_fisico(id_recurso: int, size: str = None, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
     # 1. Verificar permiso y obtener ruta de la BD
+    print("Se ha llamado a recurso archivo")
     exito, res = consultasRecursos.obtener_recurso_por_id(id_recurso, current_user_id)
     if not exito:
         raise HTTPException(status_code=403, detail="Acceso denegado o recurso no encontrado")

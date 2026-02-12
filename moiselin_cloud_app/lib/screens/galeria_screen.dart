@@ -775,7 +775,7 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                              } else {
                                final recurso = _recursosFiltrados[index - _albumesFiltrados.length];
                                final isSelected = _recursosSeleccionados.contains(recurso.id);
-                               final urlImagen = "${ApiService.baseUrl}${recurso.urlThumbnail}";
+                               final urlImagen = "${ApiService.baseUrl}/recurso/archivo/${recurso.id}?size=small";
                                
                                return GestureDetector(
                                 onLongPress: () => _toggleSeleccionRecurso(recurso.id),
@@ -797,11 +797,10 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                                             tag: "recurso_${recurso.id}", // Tag único para conectar con la otra pantalla
                                             child: CachedNetworkImage(
                                               imageUrl: urlImagen,
-                                              // 3. IMPORTANTÍSIMO: El Token para que el backend acepte la petición
+                                              
                                               httpHeaders: {"Authorization": "Bearer ${widget.token}"},
                                               fit: BoxFit.cover,
-                                              // 4. Optimización de memoria: Redimensionar en caché (crucial para listas largas)
-                                              memCacheHeight: 300, 
+                                            
                                               memCacheWidth: 300,
                                               placeholder: (context, url) => Container(color: Colors.grey[200]),
                                               errorWidget: (context, url, error) => const Icon(Icons.broken_image, color: Colors.grey),
