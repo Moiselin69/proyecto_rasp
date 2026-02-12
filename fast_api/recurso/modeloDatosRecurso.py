@@ -1,41 +1,10 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from datetime import datetime
 from typing import List, Optional
-
-class PersonaRegistro(BaseModel):
-    nombre: str
-    apellidos: str
-    correo: EmailStr
-    contra: str
-
-class Login(BaseModel):
-    correo: EmailStr
-    contra: str
-
-class AmigoRequest(BaseModel):
-    id_persona_objetivo: int 
-
-class AlbumCrear(BaseModel):
-    nombre: str
-    descripcion: str
-    id_album_padre: int | None = None
-
-class AlbumInvitacion(BaseModel):
-    id_persona_invitada: int 
-    id_album: int
-    rol: str
 
 class RecursoCompartir(BaseModel):
     id_persona_destino: int
     id_recurso: int
-
-class AlbumRecurso(BaseModel):
-    id_album: int
-    id_recurso: int
-
-class RespuestaInvitacionAlbum(BaseModel):
-    id_album: int
-    id_persona_invitadora: int
 
 class RespuestaPeticionRecurso(BaseModel):
     id_recurso: int
@@ -47,10 +16,6 @@ class SolicitudNombre(BaseModel):
 
 class SolicitudFecha(BaseModel):
     fecha: datetime
-
-class AlbumMover(BaseModel):
-    id_album: int
-    id_nuevo_padre: int | None = None
 
 class CompartirRecurso(BaseModel):
     id_recurso: int
@@ -73,7 +38,6 @@ class LoteMover(BaseModel):
     id_album_destino: Optional[int] 
 
 class CrearEnlace(BaseModel):
-    # Ahora aceptamos listas. Si es uno solo, vendrá como una lista de 1 elemento.
     ids_recursos: List[int] = []
     ids_albumes: List[int] = []
     password: Optional[str] = None

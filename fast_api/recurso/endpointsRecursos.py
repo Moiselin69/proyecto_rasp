@@ -6,79 +6,51 @@ from typing import Optional
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Body
 from fastapi.responses import FileResponse
 from PIL import Image
-import consultasRecursos
-import funcionesSeguridad
-import modeloDatos
+import fast_api.recurso.consultasRecursos as consultasRecursos
+import fast_api.seguridad.funcionesSeguridad as funcionesSeguridad
+import modeloDatosRecurso
 import cv2
-import utilidadesFicheros
-import utilidadesMetadatos
+import fast_api.utilidades.utilidadesFicheros as utilidadesFicheros
+import fast_api.utilidades.utilidadesMetadatos as utilidadesMetadatos
 import hashlib
 router = APIRouter()
 
-#~Endpoint para comprobar que una carpeta no hay dos recursos que se llamen exactamente igual
-@router.get("/recurso/verificar-duplicado")
-def verificar_duplicado(nombre: str, id_album: Optional[int] = None, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
-    id_existente = consultasRecursos.check_recurso_existe_en_album(current_user_id, nombre, id_album)
-    return {"existe": id_existente is not None}
+#-----------------------------------------------------------------------------------------------------
+#                               ENDPOINTS PARA OBTENER DATOS
+#--------------------------------------------------------------------------------------------------
 
-#~Endpoint para que el usuario vea sus propios recursos
+#~Endpoint 1. Usuario ve sus propios recursos
 @router.get("/recurso/mis_recursos")
 def mis_recursos(current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
     exito, recursos = consultasRecursos.obtener_recursos(current_user_id)
     if not exito: raise HTTPException(status_code=400, detail=str(recursos))
     return recursos
 
-#~Endpoint para borrar un recurso de manera definitiva en la cloud
-@router.delete("/recurso/eliminar-definitivo/{id_recurso}")
-def eliminar_recurso_definitivo(id_recurso: int, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
-    exito, resultado = consultasRecursos.eliminar_definitivamente_bd(id_recurso, current_user_id)
-    if not exito:
-        raise HTTPException(status_code=400, detail=str(resultado))
-    if resultado and isinstance(resultado, str): 
-        try:
-            if os.path.exists(resultado):
-                os.remove(resultado)
-            ruta_thumbnail = resultado.replace("uploads", "thumbnails")
-            if os.path.exists(ruta_thumbnail):
-                os.remove(ruta_thumbnail)
-            else:
-                nombre_sin_ext = os.path.splitext(ruta_thumbnail)[0]
-                ruta_thumb_jpg = nombre_sin_ext + ".jpg"
-                if os.path.exists(ruta_thumb_jpg):
-                    os.remove(ruta_thumb_jpg)   
-        except Exception as e:
-            print(f"Error borrando archivos físicos (BD ya limpia): {e}")
-    return {"mensaje": "Recurso eliminado permanentemente"}
+#~Endpoint 2. Usuario obtiene metadatos de un recurso
+@router.get("/recurso/metadatos/{id_recurso}")
+def get_metadatos(id_recurso: int, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+    # Primero verificamos que el usuario tenga permiso de ver el recurso
+    permiso, _ = consultasRecursos.obtener_recurso_por_id(id_recurso, current_user_id)
+    if not permiso:
+        raise HTTPException(status_code=403, detail="No tienes acceso")
+    meta = consultasRecursos.obtener_metadatos(id_recurso)
+    if not meta:
+        return {} # Devuelve vacío si no tiene EXIF
+    return meta
 
-#~Endpoint para compartir recursos
+#--------------------------------------------------------------------------------------------------------------------
+#                               ENDPOINTS PARA COMPARTIR RECURSOS
+#------------------------------------------------------------------------------------------------------
+
+#~Endpoint 3. Usuario comparte recursos
 @router.post("/recurso/compartir")
-def compartir_recurso(datos: modeloDatos.CompartirRecurso, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+def compartir_recurso(datos: modeloDatosRecurso.CompartirRecurso, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
     exito, mensaje = consultasRecursos.compartir_recurso_bd(datos.id_recurso, current_user_id, datos.id_amigo_receptor)
     if not exito:
         raise HTTPException(status_code=400, detail=mensaje)
     return {"mensaje": mensaje}
 
-#~Endpoint para visualizar o descargar un archivo
-@router.get("/recurso/archivo/{id_recurso}")
-def ver_archivo_recurso(id_recurso: int, size:str = "full",current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
-    exito, res = consultasRecursos.obtener_recurso_por_id(id_recurso, current_user_id)
-    if not exito or not res:
-        raise HTTPException(status_code=404, detail="Recurso no encontrado o acceso denegado")
-    ruta_original = res['enlace']
-    if size == "small" and (res['tipo'] == "IMAGEN" or res['tipo'] == "VIDEO"):
-        ruta_miniatura = ruta_original.replace("uploads", "thumbnails")
-        if os.path.exists(ruta_miniatura):
-            return FileResponse(ruta_miniatura)
-        nombre_sin_ext = os.path.splitext(ruta_miniatura)[0]
-        ruta_thumb_jpg = nombre_sin_ext + ".jpg"
-        if os.path.exists(ruta_thumb_jpg):
-            return FileResponse(ruta_thumb_jpg)
-        return FileResponse(ruta_original)
-    if not os.path.exists(ruta_original):
-        raise HTTPException(status_code=404, detail="El archivo físico se ha perdido")
-    return FileResponse(ruta_original)
-
-#~Endpoint para ver los recursos compartidos conmigo
+#~Endpoint 4. Usuario ve los recursos compartidos con él
 @router.get("/recurso/compartidos-conmigo")
 def ver_compartidos(current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
     exito, resultado = consultasRecursos.obtener_compartidos_conmigo(current_user_id)
@@ -86,7 +58,7 @@ def ver_compartidos(current_user_id: int = Depends(funcionesSeguridad.get_curren
         raise HTTPException(status_code=400, detail=str(resultado))
     return resultado
 
-#~Endpoint para ver quién te quiere compartir archivos
+#~Endpoint 5. Usuario ve las peticiones que tiene pendientes
 @router.get("/recurso/peticiones-recepcion")
 def ver_peticiones_recepcion(current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
     exito, resultado = consultasRecursos.obtener_peticiones_recurso_pendientes(current_user_id)
@@ -94,17 +66,21 @@ def ver_peticiones_recepcion(current_user_id: int = Depends(funcionesSeguridad.g
         raise HTTPException(status_code=400, detail=str(resultado))
     return resultado
 
-#~Endpoint para responder a una petiicon de compartir recurso
+#~Endpoint 6. Usuario respondee a una petiicon de compartir recurso
 @router.post("/recurso/peticiones-recepcion/responder")
-def responder_solicitud_recurso(datos: modeloDatos.RespuestaPeticionRecurso, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+def responder_solicitud_recurso(datos: modeloDatosRecurso.RespuestaPeticionRecurso, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
     exito, mensaje = consultasRecursos.responder_peticion_recurso(datos.id_emisor, current_user_id, datos.id_recurso, datos.aceptar)
     if not exito:
         raise HTTPException(status_code=400, detail=mensaje)
     return {"mensaje": mensaje}
 
-#~Endpoint para editar el nombre de un recursos
+#-----------------------------------------------------------------------------------------------------
+#                               ENDPOINTS PARA EDITAR META DATOS
+#------------------------------------------------------------------------------------------------------
+
+#~Endpoint 7. Usuario edita el nombre de un recursos
 @router.put("/recurso/editar/nombre/{id_recurso}")
-def editar_nombre_recurso(id_recurso: int, datos: modeloDatos.SolicitudNombre, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+def editar_nombre_recurso(id_recurso: int, datos: modeloDatosRecurso.SolicitudNombre, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
     exito, res = consultasRecursos.renombrar_recurso_seguro(id_recurso, datos.nombre, current_user_id, datos.reemplazar)
     if not exito:
         if res == "DUPLICADO":
@@ -112,22 +88,27 @@ def editar_nombre_recurso(id_recurso: int, datos: modeloDatos.SolicitudNombre, c
         raise HTTPException(status_code=400, detail=str(res))
     return {"mensaje": "Nombre actualizado"}
 
+#~Endpoint 8. Usuario editar fecha
 @router.put("/recurso/editar/fecha/{id_recurso}")
-def editar_fecha_recurso(id_recurso: int, datos: modeloDatos.SolicitudFecha, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+def editar_fecha_recurso(id_recurso: int, datos: modeloDatosRecurso.SolicitudFecha, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
     exito, res = consultasRecursos.cambiar_fecha_recurso(id_recurso, datos.fecha, current_user_id) 
     if not exito:
         raise HTTPException(status_code=400, detail=str(res))
     return {"mensaje": "Fecha actualizada"}
 
-#~Endpoint para editar fecha
-@router.put("/recurso/editar/fecha/{id_recurso}")
-def editar_fecha_recurso(id_recurso: int, datos: modeloDatos.SolicitudFecha, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
-    exito, res = consultasRecursos.cambiar_fecha_recurso(id_recurso, datos.fecha, current_user_id) 
+#~Endpoint 9. Usuario marca un recurso como favorito
+@router.put("/recurso/favorito")
+def cambiar_favorito(datos: modeloDatosRecurso.RecursoFavorito, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+    exito, msg = consultasRecursos.marcar_favorito_bd(datos.id_recurso, current_user_id, datos.es_favorito)
     if not exito:
-        raise HTTPException(status_code=400, detail=str(res))
-    return {"mensaje": "Fecha actualizada"}
+        raise HTTPException(status_code=400, detail=msg)
+    return {"mensaje": msg}
 
-#~Endpoint que sirve para mover un archivo a la papelera
+#------------------------------------------------------------------------------------------------------------------
+#                               ENDPOINT PARA MOVER Y BORRAR RECURSOS
+#------------------------------------------------------------------------------------------------------------
+
+#~Endpoint 10. Usuario mueve un archivo a la papelera
 @router.delete("/recurso/borrar/{id_recurso}")
 def borrar_recurso_papelera(id_recurso: int, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
     exito, resultado = consultasRecursos.mover_a_papelera(id_recurso, current_user_id)
@@ -137,7 +118,7 @@ def borrar_recurso_papelera(id_recurso: int, current_user_id: int = Depends(func
         raise HTTPException(status_code=400, detail=str(resultado))
     return {"mensaje": "Recurso movido a la papelera"}
 
-#~Endpoint que sirve para listar todos recursos que hay en la papelera
+#~Endpoint 11. Usuario lista todos recursos que hay en la papelera
 @router.get("/recurso/papelera")
 def ver_papelera(current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
     exito, recursos = consultasRecursos.obtener_papelera_bd(current_user_id)
@@ -145,7 +126,7 @@ def ver_papelera(current_user_id: int = Depends(funcionesSeguridad.get_current_u
         raise HTTPException(status_code=400, detail=str(recursos))
     return recursos
 
-#~Endpoint que sirve para restaurar un recurso que está en la papelera
+#~Endpoint 12. Usuario restaura un recurso que está en la papelera
 @router.put("/recurso/restaurar/{id_recurso}")
 def restaurar_recurso(id_recurso: int, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
     """Recupera un recurso de la papelera."""
@@ -154,6 +135,25 @@ def restaurar_recurso(id_recurso: int, current_user_id: int = Depends(funcionesS
         raise HTTPException(status_code=400, detail=mensaje)
     return {"mensaje": "Recurso restaurado correctamente"}
 
+#~Endpoint 13. Usuario mueve varios archivos a la papelera
+@router.put("/recurso/lote/papelera")
+def lote_papelera(lote: modeloDatosRecurso.LoteRecursos, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+    exito, msg = consultasRecursos.mover_a_papelera_lote(lote.ids, current_user_id)
+    if not exito: raise HTTPException(status_code=400, detail=msg)
+    return {"mensaje": msg}
+
+#~Endpoint 14. Usuario mueve varios archivos a una carpeta
+@router.put("/recurso/lote/mover")
+def lote_mover(lote: modeloDatosRecurso.LoteMover,current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+    exito, msg = consultasRecursos.mover_recursos_lote(lote.ids, lote.id_album_destino, current_user_id)
+    if not exito: raise HTTPException(status_code=400, detail=msg)
+    return {"mensaje": msg}
+
+#---------------------------------------------------------------------------------------------------------
+#                              Cargas y eliminaciones de recursos
+#------------------------------------------------------------------------------------------------------------------
+
+#Endpoint 15. Usuario empieza la carga por chunks de un recurso
 @router.post("/upload/init")
 def init_upload(current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
     """Paso 1: Solicitar un ID de subida"""
@@ -161,6 +161,7 @@ def init_upload(current_user_id: int = Depends(funcionesSeguridad.get_current_us
     utilidadesFicheros.iniciar_carga_chunk(upload_id)
     return {"upload_id": upload_id}
 
+#~Endpoint 16. Usuario carga un nuevo chunk del recurso
 @router.post("/upload/chunk")
 async def upload_chunk(
     upload_id: str = Form(...),
@@ -173,6 +174,7 @@ async def upload_chunk(
     utilidadesFicheros.guardar_chunk(upload_id, chunk_index, content)
     return {"mensaje": "Chunk recibido"}
 
+#~Endpoint 17. Usuario ha completado la carga de un recurso
 @router.post("/upload/complete")
 def complete_upload(
     upload_id: str = Form(...),
@@ -220,46 +222,28 @@ def complete_upload(
         print(f"Error completando subida: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.put("/recurso/lote/papelera")
-def lote_papelera(
-    lote: modeloDatos.LoteRecursos, 
-    current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)
-):
-    exito, msg = consultasRecursos.mover_a_papelera_lote(lote.ids, current_user_id)
-    if not exito: raise HTTPException(status_code=400, detail=msg)
-    return {"mensaje": msg}
-
-@router.put("/recurso/lote/mover")
-def lote_mover(
-    lote: modeloDatos.LoteMover,
-    current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)
-):
-    exito, msg = consultasRecursos.mover_recursos_lote(lote.ids, lote.id_album_destino, current_user_id)
-    if not exito: raise HTTPException(status_code=400, detail=msg)
-    return {"mensaje": msg}
-
-@router.get("/recurso/metadatos/{id_recurso}")
-def get_metadatos(id_recurso: int, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
-    # Primero verificamos que el usuario tenga permiso de ver el recurso
-    permiso, _ = consultasRecursos.obtener_recurso_por_id(id_recurso, current_user_id)
-    if not permiso:
-        raise HTTPException(status_code=403, detail="No tienes acceso")
-    
-    meta = consultasRecursos.obtener_metadatos(id_recurso)
-    if not meta:
-        return {} # Devuelve vacío si no tiene EXIF
-    return meta
-
-@router.put("/recurso/favorito")
-def cambiar_favorito(
-    datos: modeloDatos.RecursoFavorito, 
-    current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)
-):
-    exito, msg = consultasRecursos.marcar_favorito_bd(
-        datos.id_recurso, 
-        current_user_id, 
-        datos.es_favorito
-    )
+#~Endpoint 18. Usuario borra un recurso de manera definitiva en la cloud
+@router.delete("/recurso/eliminar-definitivo/{id_recurso}")
+def eliminar_recurso_definitivo(id_recurso: int, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+    exito, resultado = consultasRecursos.eliminar_definitivamente_bd(id_recurso, current_user_id)
     if not exito:
-        raise HTTPException(status_code=400, detail=msg)
-    return {"mensaje": msg}
+        raise HTTPException(status_code=400, detail=str(resultado))
+    if resultado and isinstance(resultado, str): 
+        try:
+            if os.path.exists(resultado):
+                os.remove(resultado)
+            ruta_thumbnail = resultado.replace("uploads", "thumbnails")
+            if os.path.exists(ruta_thumbnail):
+                os.remove(ruta_thumbnail)
+            else:
+                nombre_sin_ext = os.path.splitext(ruta_thumbnail)[0]
+                ruta_thumb_jpg = nombre_sin_ext + ".jpg"
+                if os.path.exists(ruta_thumb_jpg):
+                    os.remove(ruta_thumb_jpg)   
+        except Exception as e:
+            print(f"Error borrando archivos físicos (BD ya limpia): {e}")
+    return {"mensaje": "Recurso eliminado permanentemente"}
+
+
+
+

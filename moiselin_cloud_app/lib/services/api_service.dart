@@ -394,16 +394,10 @@ class ApiService {
         'id_amigo_receptor': idAmigo
       }),
     );
-
-    // Decodificamos la respuesta
     final body = jsonDecode(response.body);
-
     if (response.statusCode == 200) {
-      // Devolvemos el mensaje de éxito del backend 
-      // (Ej: "Recurso compartido exitosamente" o "Solicitud enviada...")
       return body['mensaje']; 
     } else {
-      // Manejo de errores mejorado
       String mensajeError = body['detail'] ?? body['message'] ?? 'Error desconocido';
       throw Exception(mensajeError);
     }
@@ -486,23 +480,7 @@ class ApiService {
     return response.statusCode == 200;
   }
 
-  Future<bool> verificarDuplicado(String token, String nombreArchivo, int? idAlbum) async {
-    String query = "?nombre=$nombreArchivo";
-    if (idAlbum != null) {
-      query += "&id_album=$idAlbum";
-    }
-    
-    final response = await http.get(
-      Uri.parse('$baseUrl/recurso/verificar-duplicado$query'),
-      headers: {'Authorization': 'Bearer $token'},
-    );
-
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      return data['existe'] == true;
-    }
-    return false; // Si falla, asumimos false para intentar subir y que el backend decida
-  }
+  
 
   Future<bool> soyAdmin(String token) async {
     try {

@@ -12,7 +12,7 @@ db_config = {
 }
 connection_pool = mysql.connector.pooling.MySQLConnectionPool(
     pool_name="moiselin_pool",
-    pool_size=10,
+    pool_size=100,
     pool_reset_session=True,
     **db_config
 )

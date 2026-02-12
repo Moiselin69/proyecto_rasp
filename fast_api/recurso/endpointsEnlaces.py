@@ -6,12 +6,12 @@ import db
 from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel
-import funcionesSeguridad
+import fast_api.seguridad.funcionesSeguridad as funcionesSeguridad
 import os
 import zipfile
 import io
 from fastapi.responses import StreamingResponse
-import modeloDatos
+import modeloDatosRecurso
 
 
 router = APIRouter()
@@ -31,7 +31,7 @@ def generar_token():
 # --- ENDPOINTS APP (Para crear el link) ---
 
 @router.post("/share/crear")
-def crear_enlace_publico(datos: modeloDatos.CrearEnlace, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
+def crear_enlace_publico(datos: modeloDatosRecurso.CrearEnlace, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
     conn = db.get_connection()
     cursor = conn.cursor()
     try:
