@@ -6,7 +6,8 @@ import 'package:path/path.dart' as path;
 import 'package:flutter/services.dart';
 import 'package:wechat_assets_picker/wechat_assets_picker.dart';
 import 'package:photo_manager/photo_manager.dart';
-
+import 'package:share_plus/share_plus.dart'; 
+import 'selector_amigo_screen.dart';
 // --- SERVICIOS ---
 import '../services/api_service.dart'; // Para constantes estáticas y logout
 import '../services/recurso_api.dart'; // Servicio de recursos
@@ -88,21 +89,40 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
   void _cargarDatos() async {
     setState(() => _cargando = true);
     try {
-      // AlbumApi requiere token explícito
+      // 1. Obtener los álbumes (esto se mantiene igual para ver subcarpetas)
       final albumes = await _albumApi.obtenerMisAlbumes(widget.token);
-      // RecursoApi gestiona el token internamente
-      final recursos = await _recursoApi.obtenerMisRecursos();
+
+      // 2. LÓGICA DE RECURSOS SEGÚN EL CONTEXTO
+      List<Recurso> recursos;
+      
+      if (widget.parentId != null) {
+        // ✅ CASO A: Estamos DENTRO de una carpeta. 
+        // Pedimos TODO el contenido del álbum (fotos tuyas + de otros)
+        recursos = await _albumApi.verContenidoAlbum(widget.token, widget.parentId!);
+      } else {
+        // ✅ CASO B: Estamos en el INICIO (Raíz).
+        // Pedimos tus recursos y los compartidos individualmente.
+        recursos = await _recursoApi.obtenerMisRecursos();
+      }
 
       if (mounted) {
         setState(() {
           _albumesVisibles = albumes.where((a) => a.idAlbumPadre == widget.parentId).toList();
-          _todosLosRecursos = recursos.where((r) => r.idAlbum == widget.parentId).toList();
+          
+          // Si estamos en un álbum, el filtro local ya no es estrictamente necesario 
+          // porque la API ya nos da solo los de ese álbum, pero lo dejamos por seguridad.
+          if (widget.parentId != null) {
+            _todosLosRecursos = recursos; 
+          } else {
+            _todosLosRecursos = recursos.where((r) => r.idAlbumPadre == null).toList();
+          }
+
           _aplicarFiltros();
           _cargando = false;
         });
       }
     } catch (e) {
-      print("Error cargando datos: $e");
+      print("Error en _cargarDatos: $e");
       if (mounted) setState(() => _cargando = false);
     }
   }
@@ -580,7 +600,111 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
     );
   }
 
-  void _mostrarDialogoCompartir(List<int> idsRecursos, List<int> idsAlbumes) { 
+  void _mostrarDialogoCompartir(List<int> idsRecursos, List<int> idsAlbumes) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text("Compartir selección", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
+              
+              // OPCIÓN 1: APPS EXTERNAS (WhatsApp, Telegram...)
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(color: Colors.green[100], shape: BoxShape.circle),
+                  child: const Icon(Icons.share, color: Colors.green),
+                ),
+                title: const Text("Enviar a otras apps"),
+                subtitle: const Text("WhatsApp, Instagram..."),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  // Creamos un enlace público temporal de 7 días para todo el lote
+                  final url = await _recursoApi.crearEnlacePublico(idsRecursos, idsAlbumes, null, 7);
+                  if (url != null) {
+                    // Importante: Asegúrate de importar 'package:share_plus/share_plus.dart' arriba
+                    Share.share("Te comparto estos archivos: $url"); 
+                  }
+                },
+              ),
+              
+              const Divider(),
+
+              // OPCIÓN 2: INTERNO (Amigos de la App) - AQUÍ ESTÁ EL CAMBIO PARA ÁLBUMES
+              ListTile(
+                leading: Container(
+                   padding: const EdgeInsets.all(10),
+                   decoration: BoxDecoration(color: Colors.blue[100], shape: BoxShape.circle),
+                   child: const Icon(Icons.people, color: Colors.blue),
+                ),
+                title: const Text("Compartir con amigo"),
+                subtitle: const Text("Usuarios de Moiselin Cloud"),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  
+                  // 1. Abrimos el Buscador de Amigos
+                  final idAmigo = await Navigator.push(context, MaterialPageRoute(builder: (_) => SelectorAmigoScreen(token: widget.token)));
+                  
+                  if (idAmigo != null) {
+                    int exitos = 0;
+                    int errores = 0;
+
+                    // A. COMPARTIR RECURSOS (Archivos sueltos)
+                    for(int idR in idsRecursos) {
+                       final bool exito = await _recursoApi.compartirRecurso(idR, idAmigo);
+                       if (exito) exitos++; else errores++;
+                    }
+
+                    // B. COMPARTIR ÁLBUMES (Carpetas) <--- ESTO ES LO NUEVO
+                    for(int idA in idsAlbumes) {
+                       // Invitamos al amigo al álbum como COLABORADOR
+                       final res = await _albumApi.invitarAAlbum(widget.token, idA, idAmigo, 'COLABORADOR');
+                       if(res['exito'] == true) exitos++; else errores++;
+                    }
+
+                    if (mounted) {
+                      if (errores == 0 && exitos > 0) {
+                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Todo compartido correctamente"), backgroundColor: Colors.green));
+                      } else if (exitos > 0 && errores > 0) {
+                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Algunos elementos ya estaban compartidos o fallaron"), backgroundColor: Colors.orange));
+                      } else if (exitos == 0 && errores > 0) {
+                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error: Ya compartido o sin permisos"), backgroundColor: Colors.red));
+                      }
+                    }
+                  }
+                },
+              ),
+
+              const Divider(),
+
+              // OPCIÓN 3: ENLACE PÚBLICO AVANZADO (Descarga)
+              ListTile(
+                leading: Container(
+                   padding: const EdgeInsets.all(10),
+                   decoration: BoxDecoration(color: Colors.orange[100], shape: BoxShape.circle),
+                   child: const Icon(Icons.link, color: Colors.orange),
+                ),
+                title: const Text("Crear enlace de descarga"),
+                subtitle: const Text("Con contraseña o expiración"),
+                onTap: () {
+                   Navigator.pop(ctx);
+                   _mostrarDialogoConfigurarEnlace(idsRecursos, idsAlbumes);
+                },
+              ),
+            ],
+          ),
+        );
+      }
+    );
+  }
+
+  // Este es el método auxiliar para la Opción 3 (tu antiguo diálogo)
+  void _mostrarDialogoConfigurarEnlace(List<int> idsRecursos, List<int> idsAlbumes) {
     bool usarPassword = false;
     String password = "";
     int expiracion = 0; 
@@ -590,12 +714,12 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (context, setDialogState) {
           return AlertDialog(
-            title: const Text("Crear enlace público"),
+            title: const Text("Configurar enlace"),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text("Se compartirán ${idsRecursos.length + idsAlbumes.length} elementos."),
+                  Text("Se generará un enlace para ${idsRecursos.length + idsAlbumes.length} elementos."),
                   const SizedBox(height: 15),
                   CheckboxListTile(title: const Text("Proteger con contraseña"), value: usarPassword, onChanged: (val) => setDialogState(() => usarPassword = val!)),
                   if (usarPassword) TextField(decoration: const InputDecoration(labelText: "Contraseña", border: OutlineInputBorder()), onChanged: (val) => password = val),
@@ -614,7 +738,6 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
               ElevatedButton(
                 onPressed: () async {
                   Navigator.pop(ctx);
-                  // RecursoApi (sin token)
                   String? url = await _recursoApi.crearEnlacePublico(
                     idsRecursos, 
                     idsAlbumes, 
@@ -628,7 +751,7 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error creando enlace")));
                   }
                 },
-                child: const Text("Generar Enlace"),
+                child: const Text("Generar"),
               ),
             ],
           );
@@ -637,8 +760,42 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
     );
   }
 
-  void _mostrarDialogoUrl(String url) {
-    showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text("¡Enlace listo!"), content: Column(mainAxisSize: MainAxisSize.min, children: [ const Icon(Icons.check_circle, color: Colors.green, size: 50), const SizedBox(height: 10), SelectableText(url, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)), const SizedBox(height: 5), const Text("Copia este enlace y envíalo.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey))]), actions: [ElevatedButton.icon(icon: const Icon(Icons.copy), label: const Text("Copiar"), onPressed: () { Clipboard.setData(ClipboardData(text: url)); Navigator.pop(ctx); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Enlace copiado"))); })]));
+void _mostrarDialogoUrl(String url) {
+    showDialog(
+      context: context, 
+      builder: (ctx) => AlertDialog(
+        title: const Text("¡Enlace listo!"), 
+        content: Column(
+          mainAxisSize: MainAxisSize.min, 
+          children: [ 
+            const Icon(Icons.check_circle, color: Colors.green, size: 50), 
+            const SizedBox(height: 10), 
+            SelectableText(url, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)), 
+            const SizedBox(height: 5), 
+            const Text("Copia este enlace y envíalo.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey))
+          ]
+        ), 
+        actions: [
+          ElevatedButton.icon(
+            icon: const Icon(Icons.copy), 
+            label: const Text("Copiar"), 
+            onPressed: () { 
+              Clipboard.setData(ClipboardData(text: url)); 
+              Navigator.pop(ctx); 
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Enlace copiado"))); 
+            }
+          ),
+          // Botón extra para compartir directamente el enlace generado
+          TextButton(
+            child: const Text("Compartir"),
+            onPressed: () {
+              Navigator.pop(ctx);
+              Share.share(url);
+            }
+          )
+        ]
+      )
+    );
   }
 
   Widget _getIconoArchivo(Recurso recurso) {

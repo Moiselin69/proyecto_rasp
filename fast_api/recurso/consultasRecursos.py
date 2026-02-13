@@ -19,31 +19,51 @@ THUMBNAILS_DIR = os.path.join(STATIC_DIR, "thumbnails")
 #                                    OBTENCION DE RECURSOS
 #--------------------------------------------------------------------------------------------------------
 
-def obtener_recursos(id_persona:int):
+def obtener_recursos(id_persona: int):
     connection = None
-    try: 
+    try:
         connection = db.get_connection()
         if connection.is_connected():
             cursor = connection.cursor(dictionary=True)
+            # Usamos UNION para combinar:
+            # 1. Recursos propios (Recurso_Persona)
+            # 2. Recursos compartidos conmigo (Recurso_Compartido)
             query = """
-                SELECT r.id, r.tipo, r.nombre, r.fecha_real, r.fecha_subida, ra.id_album, r.favorito
-                FROM Recurso r 
-                JOIN Recurso_Persona rp ON r.id=rp.id_recurso 
-                LEFT JOIN Recurso_Album ra ON r.id = ra.id_recurso
-                WHERE rp.id_persona=%s AND r.fecha_eliminacion IS NULL
-                ORDER BY r.fecha_real DESC
+                SELECT id, tipo, nombre, fecha_real, fecha_subida, favorito, id_album_padre 
+                FROM (
+                    -- TUS RECURSOS
+                    SELECT r.id, r.tipo, r.nombre, r.fecha_real, r.fecha_subida, r.favorito, ra.id_album as id_album_padre
+                    FROM Recurso r 
+                    JOIN Recurso_Persona rp ON r.id = rp.id_recurso 
+                    LEFT JOIN Recurso_Album ra ON r.id = ra.id_recurso
+                    WHERE rp.id_persona = %s AND r.fecha_eliminacion IS NULL
+                    
+                    UNION
+                    
+                    -- RECURSOS COMPARTIDOS CONTIGO
+                    SELECT r.id, r.tipo, r.nombre, r.fecha_real, r.fecha_subida, r.favorito, NULL as id_album_padre
+                    FROM Recurso r
+                    JOIN Recurso_Compartido rc ON r.id = rc.id_recurso
+                    WHERE rc.id_receptor = %s AND r.fecha_eliminacion IS NULL
+                ) AS TodosRecursos
+                ORDER BY fecha_real DESC
             """
-            valores = (id_persona, )
+            # Pasamos el ID dos veces (una para cada SELECT del UNION)
+            valores = (id_persona, id_persona)
             cursor.execute(query, valores)
             recursos = cursor.fetchall()
+            
             for recurso in recursos:
                 recurso['url_visualizacion'] = f"/recurso/archivo/{recurso['id']}"
                 recurso['url_thumbnail'] = f"/recurso/archivo/{recurso['id']}?size=small"
+                # Añadimos flag para distinguir en el frontend si es necesario
+                recurso['es_compartido'] = False # Por defecto, la lógica de Flutter no lo distingue visualmente, se mezclan.
+            
             return (True, recursos)
     except Error as e:
-        print(f"Error en obtener recursos en MySql: {e}")
+        print(f"Error en obtener recursos: {e}")
         return (False, str(e))
-    finally: 
+    finally:
         if connection is not None and connection.is_connected():
             if 'cursor' in locals(): cursor.close()
             connection.close()
@@ -54,17 +74,36 @@ def obtener_recurso_por_id(id_recurso: int, id_persona: int):
     try:
         connection = db.get_connection()
         cursor = connection.cursor(dictionary=True)
+        
+        # Ahora comprobamos 3 cosas: Dueño, Compartido individual o Miembro del Álbum
         query = """
             SELECT R.* FROM Recurso R
-            JOIN Recurso_Persona RP ON R.id = RP.id_recurso
-            WHERE R.id = %s AND RP.id_persona = %s
+            WHERE R.id = %s 
+            AND (
+                -- 1. Eres el dueño
+                EXISTS (SELECT 1 FROM Recurso_Persona RP WHERE RP.id_recurso = R.id AND RP.id_persona = %s)
+                OR 
+                -- 2. Te lo han compartido individualmente
+                EXISTS (SELECT 1 FROM Recurso_Compartido RC WHERE RC.id_recurso = R.id AND RC.id_receptor = %s)
+                OR
+                -- 3. Eres miembro del álbum que contiene este recurso (NUEVO)
+                EXISTS (
+                    SELECT 1 FROM Recurso_Album RA
+                    JOIN Miembro_Album MA ON RA.id_album = MA.id_album
+                    WHERE RA.id_recurso = R.id AND MA.id_persona = %s
+                )
+            )
         """
-        cursor.execute(query, (id_recurso, id_persona))
+        # Pasamos id_persona TRES veces (una para cada comprobación)
+        cursor.execute(query, (id_recurso, id_persona, id_persona, id_persona))
+        
         resultado = cursor.fetchone()
         if not resultado:
             return (False, "Recurso no encontrado o sin acceso")
         return (True, resultado)
+        
     except Error as e:
+        print(f"Error en obtener_recurso_por_id: {e}")
         return (False, str(e))
     finally:
         if cursor: cursor.close()
@@ -115,27 +154,36 @@ def compartir_recurso_bd(id_recurso, id_emisor, id_receptor):
     conexion = db.get_connection()
     try:
         with conexion.cursor() as cursor:
+            # 1. Verificar que eres el dueño
             sql_owner = "SELECT id FROM Recurso WHERE id = %s AND id_creador = %s"
             cursor.execute(sql_owner, (id_recurso, id_emisor))
             if not cursor.fetchone():
                 return False, "Error: No puedes compartir un recurso que no es tuyo."
+
+            # 2. Verificar si sois amigos (TABLA CORREGIDA)
             sql_amigos = """
-                SELECT 1 FROM Persona_Amiga 
-                WHERE (id_persona_1 = %s AND id_persona_2 = %s) 
-                   OR (id_persona_1 = %s AND id_persona_2 = %s)
+                SELECT 1 FROM Amistad 
+                WHERE ((id_persona1 = %s AND id_persona2 = %s) 
+                   OR (id_persona1 = %s AND id_persona2 = %s))
+                   AND estado = 'ACEPTADA'
             """
             cursor.execute(sql_amigos, (id_emisor, id_receptor, id_receptor, id_emisor))
             es_amigo = cursor.fetchone()
+
+            # LÓGICA DE COMPARTIR
             if es_amigo:
+                # Caso A: Sois amigos -> Compartir Directamente
                 sql_check = "SELECT 1 FROM Recurso_Compartido WHERE id_recurso=%s AND id_emisor=%s AND id_receptor=%s"
                 cursor.execute(sql_check, (id_recurso, id_emisor, id_receptor))
                 if cursor.fetchone():
                      return False, "Ya habías compartido este recurso con esta persona."
+                
                 sql_insert = "INSERT INTO Recurso_Compartido (id_recurso, id_emisor, id_receptor) VALUES (%s, %s, %s)"
                 cursor.execute(sql_insert, (id_recurso, id_emisor, id_receptor))
                 conexion.commit()
                 return True, "Recurso compartido exitosamente."
             else:
+                # Caso B: NO sois amigos -> Enviar Solicitud (Peticion_Recurso)
                 sql_check_pet = """
                     SELECT 1 FROM Peticion_Recurso 
                     WHERE id_recurso=%s AND id_persona=%s AND id_persona_compartida=%s
@@ -143,6 +191,8 @@ def compartir_recurso_bd(id_recurso, id_emisor, id_receptor):
                 cursor.execute(sql_check_pet, (id_recurso, id_emisor, id_receptor))
                 if cursor.fetchone():
                     return False, "Ya existe una solicitud pendiente para compartir este archivo."
+                
+                # OJO: id_persona es quien ENVÍA (emisor), id_persona_compartida es el RECEPTOR
                 sql_pet = """
                     INSERT INTO Peticion_Recurso (id_persona, id_persona_compartida, id_recurso, estado) 
                     VALUES (%s, %s, %s, 'PENDIENTE')
@@ -150,7 +200,9 @@ def compartir_recurso_bd(id_recurso, id_emisor, id_receptor):
                 cursor.execute(sql_pet, (id_emisor, id_receptor, id_recurso))
                 conexion.commit()
                 return True, "No sois amigos. Se ha enviado una solicitud para compartir."
+
     except Exception as e:
+        print(f"Error en compartir_recurso_bd: {e}") # Añade print para depurar mejor
         return False, str(e)
     finally:
         conexion.close()
@@ -169,7 +221,18 @@ def obtener_compartidos_conmigo(id_receptor):
                 ORDER BY RC.fecha_compartido DESC
             """
             cursor.execute(sql, (id_receptor,))
-            return True, cursor.fetchall()
+            resultados = cursor.fetchall()
+
+            # --- CORRECCIÓN: Generar URLs válidas para Flutter ---
+            for recurso in resultados:
+                recurso['url_visualizacion'] = f"/recurso/archivo/{recurso['id']}"
+                recurso['url_thumbnail'] = f"/recurso/archivo/{recurso['id']}?size=small"
+                # Opcional: Borrar la ruta física por seguridad para no enviarla al cliente
+                if 'enlace' in recurso:
+                    del recurso['enlace']
+            # -----------------------------------------------------
+
+            return True, resultados
     except Exception as e:
         return False, str(e)
     finally:

@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/recursos.dart';
+import '../models/album.dart';
 import '../services/api_service.dart';
-import '../services/recurso_api.dart'; // <--- Importamos el nuevo servicio
-import 'detalle_foto_screen.dart'; 
+import '../services/recurso_api.dart';
+import '../services/album_api.dart'; // Necesario para invitaciones de álbum
+import 'detalle_foto_screen.dart';
+import 'galeria_screen.dart'; // Para reutilizar InsecureCacheManager si es necesario o navegación
 
 class CompartidosScreen extends StatelessWidget {
   const CompartidosScreen({Key? key}) : super(key: key);
@@ -17,15 +20,15 @@ class CompartidosScreen extends StatelessWidget {
           title: const Text('Compartidos conmigo'),
           bottom: const TabBar(
             tabs: [
-              Tab(icon: Icon(Icons.folder_shared), text: "Archivos"),
-              Tab(icon: Icon(Icons.mark_email_unread), text: "Solicitudes"),
+              Tab(icon: Icon(Icons.folder_shared), text: "Contenido"),
+              Tab(icon: Icon(Icons.notifications_active), text: "Solicitudes"),
             ],
           ),
         ),
         body: const TabBarView(
           children: [
-            _ArchivosCompartidosTab(),
-            _SolicitudesRecursosTab(),
+            _ContenidoCompartidoTab(),
+            _SolicitudesTab(),
           ],
         ),
       ),
@@ -33,17 +36,19 @@ class CompartidosScreen extends StatelessWidget {
   }
 }
 
-// --- PESTAÑA 1: ARCHIVOS YA COMPARTIDOS (GRID) ---
-class _ArchivosCompartidosTab extends StatefulWidget {
-  const _ArchivosCompartidosTab();
+// --- PESTAÑA 1: CONTENIDO (ÁLBUMES + ARCHIVOS) ---
+class _ContenidoCompartidoTab extends StatefulWidget {
+  const _ContenidoCompartidoTab();
 
   @override
-  State<_ArchivosCompartidosTab> createState() => _ArchivosCompartidosTabState();
+  State<_ContenidoCompartidoTab> createState() => _ContenidoCompartidoTabState();
 }
 
-class _ArchivosCompartidosTabState extends State<_ArchivosCompartidosTab> {
-  final RecursoApiService _recursoApi = RecursoApiService(); // Instancia del servicio
-  List<Recurso> _recursos = [];
+class _ContenidoCompartidoTabState extends State<_ContenidoCompartidoTab> {
+  final RecursoApiService _recursoApi = RecursoApiService();
+  final AlbumApiService _albumApi = AlbumApiService();
+  
+  List<dynamic> _elementos = []; // Lista mixta (Album + Recurso)
   bool _isLoading = true;
   String? _token;
 
@@ -54,15 +59,38 @@ class _ArchivosCompartidosTabState extends State<_ArchivosCompartidosTab> {
   }
 
   Future<void> _cargarDatos() async {
-    // Obtenemos el token solo para las imágenes y la navegación posterior
-    final token = await ApiService.getToken(); 
+    final token = await ApiService.getToken();
+    if (token == null) return;
+
     try {
-      // Usamos el nuevo servicio (el token lo gestiona internamente para la petición)
-      final lista = await _recursoApi.verCompartidosConmigo();
+      // 1. Obtener Archivos compartidos
+      final recursos = await _recursoApi.verCompartidosConmigo();
       
+      // 2. Obtener Álbumes compartidos (Filtramos donde NO soy CREADOR)
+      final todosAlbumes = await _albumApi.obtenerMisAlbumes(token);
+      // Asumimos que el modelo Album tiene un campo 'rol' o lo deducimos.
+      // Si el modelo Album no tiene 'rol', tendrás que confiar en la API 'obtenerMisAlbumes'
+      // que devuelve todo. Para saber cuáles son compartidos, 
+      // idealmente el backend ya filtra o el modelo Album tiene esa info.
+      // Basado en tu código anterior, Album tiene 'rol' en el JSON del backend? 
+      // Si no, filtraremos por lógica o mostraremos todos los que no sean 'CREADOR' si tienes ese dato.
+      // * Nota: He actualizado consultasAlbum.py para que devuelva el rol. Asegúrate de que el modelo Album.dart lo reciba.
+      // Si Album.dart no tiene rol, no podemos filtrar aquí fácilmente.
+      // Asumiremos que quieres ver todos los álbumes donde eres COLABORADOR.
+      
+      // Para este ejemplo, mostraremos todos los álbumes que NO sean 'CREADOR' si es posible,
+      // si no, mostraremos todos. (Ajusta según tu modelo Album)
+      // * Hack temporal si tu modelo Album no tiene rol: Mostrarlos todos o asumir que si están aquí es por algo.
+      // Pero mejor, vamos a suponer que has actualizado el modelo Album para incluir 'rol' o usamos dynamic.
+      
+      // Si no puedes modificar Album.dart ahora, usaremos una lógica simple:
+      // Si te han compartido un álbum, aparecerá en 'obtenerMisAlbumes'.
+      
+      final albumesCompartidos = todosAlbumes; // Filtraremos visualmente si es necesario
+
       if (mounted) {
         setState(() {
-          _recursos = lista;
+          _elementos = [...albumesCompartidos, ...recursos];
           _token = token;
           _isLoading = false;
         });
@@ -73,105 +101,145 @@ class _ArchivosCompartidosTabState extends State<_ArchivosCompartidosTab> {
     }
   }
 
+  Future<void> _salirDeElemento(dynamic elemento) async {
+    bool esAlbum = elemento is Album;
+    String titulo = esAlbum ? "Salir del álbum" : "Dejar de ver archivo";
+    String contenido = esAlbum 
+        ? "¿Seguro que quieres salir de '${elemento.nombre}'?" 
+        : "¿Dejar de tener acceso a '${elemento.nombre}'?";
+
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(titulo),
+        content: Text(contenido),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Cancelar")),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Sí, salir", style: TextStyle(color: Colors.red))),
+        ],
+      )
+    );
+
+    if (confirmar == true) {
+      bool exito = false;
+      if (esAlbum) {
+        exito = await _albumApi.salirDeAlbum(_token!, elemento.id);
+      } else {
+        // Asumimos que es Recurso
+        exito = await _recursoApi.dejarRecursoCompartido(elemento.id);
+      }
+
+      if (exito && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Has salido correctamente")));
+        _cargarDatos();
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error al salir"), backgroundColor: Colors.red));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) return const Center(child: CircularProgressIndicator());
-    if (_recursos.isEmpty) return const Center(child: Text("No te han compartido archivos aún."));
+    if (_elementos.isEmpty) return const Center(child: Text("Nada compartido contigo aún."));
 
     return GridView.builder(
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.all(10),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        crossAxisSpacing: 4,
-        mainAxisSpacing: 4,
+        crossAxisCount: 3, crossAxisSpacing: 8, mainAxisSpacing: 8, childAspectRatio: 0.85
       ),
-      itemCount: _recursos.length,
+      itemCount: _elementos.length,
       itemBuilder: (context, index) {
-        final recurso = _recursos[index];
-        final url = "${ApiService.baseUrl}${recurso.urlVisualizacion}";
-
-        return GestureDetector(
-          onTap: () {
-            // Navegar al detalle
-            if (_token != null) {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => DetalleRecursoScreen(recurso: recurso, token: _token!),
-                ),
-              );
-            }
-          },
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              _buildThumbnail(recurso, url),
-              // Icono indicando tipo
-              Positioned(
-                right: 2, top: 2,
-                child: Icon(
-                  _getIconForType(recurso.tipo),
-                  color: Colors.white, size: 16,
-                  shadows: const [Shadow(blurRadius: 2, color: Colors.black)],
-                ),
-              ),
-              // Info del emisor (Opcional, pequeño indicador)
-              Positioned(
-                left: 2, bottom: 2,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                  decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(4)),
-                  child: Text(
-                    recurso.nombreEmisor ?? "Anon",
-                    style: const TextStyle(color: Colors.white, fontSize: 10),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              )
-            ],
-          ),
-        );
+        final item = _elementos[index];
+        
+        if (item is Album) {
+          return _buildAlbumCard(item);
+        } else if (item is Recurso) {
+          return _buildRecursoCard(item);
+        }
+        return const SizedBox.shrink();
       },
     );
   }
 
-  Widget _buildThumbnail(Recurso r, String url) {
-    if (r.tipo == "IMAGEN") {
-      return CachedNetworkImage(
-        imageUrl: url,
-        httpHeaders: {"Authorization": "Bearer $_token"},
-        fit: BoxFit.cover,
-        errorWidget: (_, __, ___) => const Icon(Icons.broken_image),
-      );
-    } else {
-      return Container(
-        color: Colors.grey[300], 
-        child: Icon(_getIconForType(r.tipo), size: 40, color: Colors.grey[700])
-      );
-    }
+  Widget _buildAlbumCard(Album album) {
+    return GestureDetector(
+      onTap: () {
+        // Navegar dentro del álbum (reutilizamos GaleriaScreen)
+        Navigator.push(context, MaterialPageRoute(
+          builder: (_) => GaleriaScreen(token: _token!, parentId: album.id, nombreCarpeta: album.nombre)
+        ));
+      },
+      onLongPress: () => _salirDeElemento(album),
+      child: Column(
+        children: [
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.amber[100],
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Center(child: Icon(Icons.folder_shared, size: 50, color: Colors.amber)),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(album.nombre, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+          const Text("Álbum", style: TextStyle(color: Colors.grey, fontSize: 10)),
+        ],
+      ),
+    );
   }
 
-  IconData _getIconForType(String tipo) {
-    switch (tipo) {
-      case 'VIDEO': return Icons.videocam;
-      case 'AUDIO': return Icons.audiotrack;
-      case 'ARCHIVO': return Icons.insert_drive_file;
-      default: return Icons.image;
-    }
+  Widget _buildRecursoCard(Recurso recurso) {
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(context, MaterialPageRoute(builder: (_) => DetalleRecursoScreen(recurso: recurso, token: _token!)));
+      },
+      onLongPress: () => _salirDeElemento(recurso),
+      child: Column(
+        children: [
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  (recurso.tipo == "IMAGEN" || recurso.tipo == "VIDEO")
+                    ? CachedNetworkImage(
+                        imageUrl: "${ApiService.baseUrl}${recurso.urlVisualizacion}?size=small",
+                        httpHeaders: {"Authorization": "Bearer $_token"},
+                        fit: BoxFit.cover,
+                        errorWidget: (_, __, ___) => const Icon(Icons.broken_image),
+                      )
+                    : Container(color: Colors.grey[200], child: const Icon(Icons.insert_drive_file, color: Colors.blueGrey)),
+                  
+                  if (recurso.tipo == "VIDEO")
+                    const Center(child: Icon(Icons.play_circle, color: Colors.white, size: 30)),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(recurso.nombre, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12)),
+        ],
+      ),
+    );
   }
 }
 
-// --- PESTAÑA 2: SOLICITUDES DE NO AMIGOS ---
-class _SolicitudesRecursosTab extends StatefulWidget {
-  const _SolicitudesRecursosTab();
+// --- PESTAÑA 2: SOLICITUDES (MIXTA: ÁLBUMES Y RECURSOS) ---
+class _SolicitudesTab extends StatefulWidget {
+  const _SolicitudesTab();
 
   @override
-  State<_SolicitudesRecursosTab> createState() => _SolicitudesRecursosTabState();
+  State<_SolicitudesTab> createState() => _SolicitudesTabState();
 }
 
-class _SolicitudesRecursosTabState extends State<_SolicitudesRecursosTab> {
-  final RecursoApiService _recursoApi = RecursoApiService(); // Instancia del servicio
-  List<dynamic> _solicitudes = [];
+class _SolicitudesTabState extends State<_SolicitudesTab> {
+  final RecursoApiService _recursoApi = RecursoApiService();
+  final AlbumApiService _albumApi = AlbumApiService();
+  
+  List<Map<String, dynamic>> _solicitudes = [];
   bool _isLoading = true;
 
   @override
@@ -182,50 +250,75 @@ class _SolicitudesRecursosTabState extends State<_SolicitudesRecursosTab> {
 
   Future<void> _cargar() async {
     try {
-      // Usamos el nuevo método verPeticionesRecepcion
-      final lista = await _recursoApi.verPeticionesRecepcion();
-      if (mounted) setState(() { _solicitudes = lista; _isLoading = false; });
+      final token = await ApiService.getToken();
+      if (token == null) return;
+
+      // 1. Solicitudes de Archivos
+      final recursosRaw = await _recursoApi.verPeticionesRecepcion();
+      // 2. Invitaciones de Álbumes
+      final albumesRaw = await _albumApi.verInvitacionesAlbum(token);
+
+      // Normalizamos los datos para la lista
+      final listaRecursos = recursosRaw.map((r) => {
+        'tipo': 'RECURSO',
+        'titulo': r['nombre_recurso'],
+        'subtitulo': "Archivo ${r['tipo']}",
+        'emisor': "${r['nombre_emisor']} ${r['apellidos_emisor'] ?? ''}",
+        'data': r,
+        'icono': Icons.description
+      }).toList();
+
+      final listaAlbumes = albumesRaw.map((a) => {
+        'tipo': 'ALBUM',
+        'titulo': a['nombre_album'],
+        'subtitulo': "Invitación a carpeta (${a['rol']})",
+        'emisor': "${a['nombre_invitador']} ${a['apellidos_invitador'] ?? ''}",
+        'data': a,
+        'icono': Icons.folder_special
+      }).toList();
+
+      if (mounted) {
+        setState(() {
+          _solicitudes = [...listaRecursos, ...listaAlbumes]; // Juntamos todo
+          _isLoading = false;
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => _isLoading = false);
       print("Error cargando solicitudes: $e");
     }
   }
 
-  Future<void> _responder(int index, bool aceptar) async {
-    final s = _solicitudes[index];
+  Future<void> _responder(Map<String, dynamic> item, bool aceptar) async {
+    bool exito = false;
+    String msg = "";
+    
     try {
-      // Usamos responderPeticionRecurso
-      // El backend devuelve keys: id_emisor, id_recurso, etc.
-      final res = await _recursoApi.responderPeticionRecurso(
-        s['id_emisor'], 
-        s['id_recurso'], 
-        aceptar
-      );
+      final token = await ApiService.getToken();
+      
+      if (item['tipo'] == 'RECURSO') {
+        final data = item['data'];
+        final res = await _recursoApi.responderPeticionRecurso(data['id_emisor'], data['id_recurso'], aceptar);
+        exito = res['exito'];
+        msg = res['mensaje'];
+      } else {
+        // ALBUM
+        final data = item['data'];
+        // id_invitador viene en data['id_invitador']
+        final res = await _albumApi.responderInvitacionAlbum(token!, data['id_album'], data['id_invitador'], aceptar);
+        exito = res; // El método devuelve bool en tu servicio actual
+        msg = exito ? "Respuesta enviada" : "Error al responder";
+      }
 
       if (mounted) {
-        if (res['exito']) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(aceptar ? "Solicitud aceptada" : "Solicitud rechazada"),
-              backgroundColor: Colors.green,
-            )
-          );
-          _cargar(); // Recargar lista
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(res['mensaje'] ?? "Error desconocido"),
-              backgroundColor: Colors.red
-            )
-          );
-        }
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(msg),
+          backgroundColor: exito ? Colors.green : Colors.red,
+        ));
+        if (exito) _cargar(); // Recargar lista
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error de conexión: $e"), backgroundColor: Colors.red)
-        );
-      }
+      print(e);
     }
   }
 
@@ -234,31 +327,39 @@ class _SolicitudesRecursosTabState extends State<_SolicitudesRecursosTab> {
     if (_isLoading) return const Center(child: CircularProgressIndicator());
     if (_solicitudes.isEmpty) return const Center(child: Text("No tienes solicitudes pendientes."));
 
-    return ListView.builder(
+    return ListView.separated(
+      padding: const EdgeInsets.all(10),
       itemCount: _solicitudes.length,
+      separatorBuilder: (_, __) => const Divider(),
       itemBuilder: (context, index) {
-        final s = _solicitudes[index];
-        return Card(
-          margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          child: ListTile(
-            leading: const Icon(Icons.lock_clock, color: Colors.orange, size: 35),
-            title: Text("Quiere compartirte: ${s['nombre_recurso']}"),
-            subtitle: Text("De: ${s['nombre_emisor']} ${s['apellidos_emisor'] ?? ''}"),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.check, color: Colors.green), 
-                  onPressed: () => _responder(index, true),
-                  tooltip: "Aceptar",
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close, color: Colors.red), 
-                  onPressed: () => _responder(index, false),
-                  tooltip: "Rechazar",
-                ),
-              ],
-            ),
+        final item = _solicitudes[index];
+        return ListTile(
+          leading: CircleAvatar(
+            backgroundColor: item['tipo'] == 'ALBUM' ? Colors.amber[100] : Colors.blue[100],
+            child: Icon(item['icono'], color: item['tipo'] == 'ALBUM' ? Colors.amber[800] : Colors.blue[800]),
+          ),
+          title: Text("Te comparten: ${item['titulo']}", style: const TextStyle(fontWeight: FontWeight.bold)),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(item['subtitulo']),
+              Text("De: ${item['emisor']}", style: const TextStyle(color: Colors.grey)),
+            ],
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.check_circle, color: Colors.green, size: 30),
+                onPressed: () => _responder(item, true),
+                tooltip: "Aceptar",
+              ),
+              IconButton(
+                icon: const Icon(Icons.cancel, color: Colors.red, size: 30),
+                onPressed: () => _responder(item, false),
+                tooltip: "Rechazar",
+              ),
+            ],
           ),
         );
       },

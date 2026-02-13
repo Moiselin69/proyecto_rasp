@@ -7,7 +7,7 @@ class Recurso {
   final DateTime fechaSubida;
   final String urlVisualizacion;
   final String urlThumbnail;
-  final int? idAlbum;
+  final int? idAlbumPadre;
   final String? nombreEmisor;
   final String? apellidosEmisor;
   final DateTime? fechaCompartido;
@@ -22,7 +22,7 @@ class Recurso {
     required this.fechaSubida,
     required this.urlVisualizacion,
     required this.urlThumbnail,
-    this.idAlbum,
+    this.idAlbumPadre,
     this.nombreEmisor,
     this.apellidosEmisor,
     this.fechaCompartido,
@@ -59,7 +59,7 @@ class Recurso {
           : DateTime.now(),
       urlVisualizacion: urlLimpia,
       urlThumbnail: thumb,
-      idAlbum: json['id_album'],
+      idAlbumPadre: json['id_album'] ?? json['id_album_padre'],   
       nombreEmisor: json['nombre_emisor'],
       apellidosEmisor: json['apellidos_emisor'],
       fechaCompartido: json['fecha_compartido'] != null

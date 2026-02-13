@@ -65,26 +65,32 @@ class RecursoApiService {
   // ==========================================
 
   // Endpoint 3: Compartir recurso con un amigo
-  Future<Map<String, dynamic>> compartirRecurso(int idRecurso, int idAmigo) async {
-    final uri = Uri.parse('$baseUrl/recurso/compartir');
+  Future<bool> compartirRecurso(int idRecurso, int idAmigo) async {
+    final token = await ApiService.getToken();
+    if (token == null) return false;
+    
     try {
       final response = await http.post(
-        uri,
-        headers: await _getHeaders(),
+        Uri.parse('$baseUrl/recurso/compartir'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
         body: jsonEncode({
           'id_recurso': idRecurso,
-          'id_amigo_receptor': idAmigo
+          'id_amigo_receptor': idAmigo,
         }),
       );
-      
-      final data = jsonDecode(response.body);
+
       if (response.statusCode == 200) {
-        return {'exito': true, 'mensaje': data['mensaje']};
+        return true;
       } else {
-        return {'exito': false, 'mensaje': data['detail'] ?? 'Error al compartir'};
+        print("Error compartir interno: ${response.body}");
+        return false;
       }
     } catch (e) {
-      return {'exito': false, 'mensaje': e.toString()};
+      print("Error sharing internal: $e");
+      return false;
     }
   }
 
@@ -176,6 +182,17 @@ class RecursoApiService {
     } catch (e) {
       print("Error creando enlace: $e");
       return null;
+    }
+  }
+
+  Future<bool> dejarRecursoCompartido(int idRecurso) async {
+    final uri = Uri.parse('$baseUrl/recurso/compartidos/salir/$idRecurso');
+    try {
+      final response = await http.delete(uri, headers: await _getHeaders());
+      return response.statusCode == 200;
+    } catch (e) {
+      print("Error al salir del recurso: $e");
+      return false;
     }
   }
 

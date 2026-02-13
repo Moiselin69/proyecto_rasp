@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import "../services/api_service.dart";
+import '../models/persona.dart';
 
 class PersonaApiService {
   final String baseUrl = ApiService.baseUrl;
@@ -235,6 +236,38 @@ class PersonaApiService {
       }
     } catch (e) {
       return {'exito': false, 'mensaje': e.toString()};
+    }
+  }
+
+  // Endpoint específico para el Selector de Amigos
+  Future<List<Persona>> obtenerAmigosConfirmados(String token) async {
+    final url = Uri.parse('$baseUrl/persona/amistades');
+    
+    try {
+      final response = await http.get(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        List<dynamic> data = jsonDecode(response.body);
+        
+        // 1. Filtramos solo los amigos confirmados (quitamos solicitudes)
+        var amigosJson = data.where((item) => item['estado'] == 'AMIGO');
+
+        // 2. Convertimos a lista de objetos Persona
+        // Asegúrate de que tu modelo Persona tenga el factory .fromJson
+        return amigosJson.map((json) => Persona.fromJson(json)).toList();
+      } else {
+        print("Error obteniendo amigos: ${response.body}");
+        return [];
+      }
+    } catch (e) {
+      print("Excepción buscando amigos: $e");
+      return [];
     }
   }
 }

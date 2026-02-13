@@ -5,12 +5,19 @@ from typing import Optional
 from dotenv import load_dotenv
 from fastapi import HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, OAuth2PasswordBearer
+from passlib.context import CryptContext
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/persona/login")
 load_dotenv()
 security = HTTPBearer()
 SECRET_KEY = os.getenv('SECRET_KEY') # es un conjunto de caracteres para generar los token
 ALGORITHM = "HS256" # el algoritmo utilizada para generar los token
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # El tiempo que va a durar el token vivo, que va a ser un día
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+def hashear_contra(password: str) -> str:
+    return pwd_context.hash(password)
+
+def verificar_contra(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
 
 def crear_token_acceso(data: dict, expires_delta: Optional[timedelta] = None): # funcion que sirve para crear el token de acceso
     to_encode = data.copy()

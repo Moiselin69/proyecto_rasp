@@ -13,10 +13,12 @@ import '../models/metadatos.dart';
 import '../services/api_service.dart';
 import '../services/download_service.dart';
 import '../services/recurso_api.dart'; // <--- Nuevo servicio
-import '../services/persona_api.dart'; // <--- Nuevo servicio
 
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:share_plus/share_plus.dart';
+import 'selector_amigo_screen.dart';
+import 'package:flutter/services.dart';
 
 class DetalleRecursoScreen extends StatefulWidget {
   final Recurso recurso;
@@ -31,7 +33,6 @@ class DetalleRecursoScreen extends StatefulWidget {
 class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
   // Instancias de los nuevos servicios
   final RecursoApiService _recursoApi = RecursoApiService();
-  final PersonaApiService _personaApi = PersonaApiService();
   final DownloadService _downloadService = DownloadService();
   
   // Variables locales para edición
@@ -218,93 +219,192 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
 
   // --- FUNCIONES DE ACCIÓN ---
 
-  void _mostrarDialogoCompartir() {
-    showDialog(
+  void _mostrarDialogoCompartir(Recurso recurso) {
+    showModalBottomSheet(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Compartir con...'),
-          content: SizedBox(
-            width: double.maxFinite,
-            height: 300,
-            child: FutureBuilder<List<dynamic>>(
-              future: _personaApi.obtenerAmistades(), // Usamos PersonaApiService
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (snapshot.hasError) {
-                  return Center(child: Text('Error: ${snapshot.error}'));
-                }
-                
-                // Filtramos solo los que son AMIGOS (la API devuelve mezclado con solicitudes)
-                final listaCompleta = snapshot.data ?? [];
-                final amigos = listaCompleta.where((element) => element['estado'] == 'AMIGO').toList();
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text("Compartir recurso", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
+              
+              // OPCIÓN 1: APPS EXTERNAS
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(color: Colors.green[100], shape: BoxShape.circle),
+                  child: const Icon(Icons.share, color: Colors.green),
+                ),
+                title: const Text("Enviar a otras apps"),
+                subtitle: const Text("WhatsApp, Instagram, Telegram..."),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  // Creamos un enlace público temporal (7 días)
+                  final url = await _recursoApi.crearEnlacePublico([recurso.id], [], null, 7);
+                  if (url != null) {
+                    // Compartimos el texto con el enlace
+                    Share.share("Mira este archivo: $url");
+                  }
+                },
+              ),
+              
+              const Divider(),
 
-                if (amigos.isEmpty) {
-                  return const Center(child: Text('No tienes amigos agregados para compartir.'));
-                }
+              // OPCIÓN 2: INTERNO (Amigos)
+              ListTile(
+                leading: Container(
+                   padding: const EdgeInsets.all(10),
+                   decoration: BoxDecoration(color: Colors.blue[100], shape: BoxShape.circle),
+                   child: const Icon(Icons.people, color: Colors.blue),
+                ),
+                title: const Text("Compartir con amigo"),
+                subtitle: const Text("Usuarios de Moiselin Cloud"),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  final idAmigo = await Navigator.push(context, MaterialPageRoute(builder: (_) => SelectorAmigoScreen(token: widget.token)));
+                  
+                  if (idAmigo != null) {
+                     bool ok = await _recursoApi.compartirRecurso(recurso.id, idAmigo);
+                     if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(ok ? "Compartido con éxito" : "Error al compartir"),
+                        backgroundColor: ok ? Colors.green : Colors.red,
+                      ));
+                    }
+                  }
+                },
+              ),
 
-                return ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: amigos.length,
-                  itemBuilder: (context, index) {
-                    final amigo = amigos[index];
-                    return ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor: Colors.blueAccent,
-                        child: Text(amigo['nombre'][0].toUpperCase(), style: const TextStyle(color: Colors.white)),
-                      ),
-                      title: Text('${amigo['nombre']} ${amigo['apellidos'] ?? ''}'),
-                      subtitle: Text(amigo['nickname'] ?? ''),
-                      onTap: () {
-                        Navigator.pop(context);
-                        _enviarRecurso(amigo['id']);
-                      },
-                    );
-                  },
-                );
-              },
-            ),
+              const Divider(),
+
+              // OPCIÓN 3: ENLACE PÚBLICO (Avanzado)
+              ListTile(
+                leading: Container(
+                   padding: const EdgeInsets.all(10),
+                   decoration: BoxDecoration(color: Colors.orange[100], shape: BoxShape.circle),
+                   child: const Icon(Icons.link, color: Colors.orange),
+                ),
+                title: const Text("Opciones de enlace"),
+                subtitle: const Text("Contraseña, expiración..."),
+                onTap: () {
+                   Navigator.pop(ctx);
+                   _mostrarDialogoConfigurarEnlace(recurso);
+                },
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancelar'),
-            ),
-          ],
         );
-      },
+      }
     );
   }
+  void _mostrarDialogoConfigurarEnlace(Recurso recurso) {
+    bool usarPassword = false;
+    String password = "";
+    int expiracion = 0; 
 
-  Future<void> _enviarRecurso(int idAmigo) async {
-    try {
-      // Usamos RecursoApiService
-      final res = await _recursoApi.compartirRecurso(widget.recurso.id, idAmigo);
-
-      if (mounted) {
-        if (res['exito']) {
-           String mensaje = res['mensaje'];
-           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(mensaje),
-              backgroundColor: mensaje.toLowerCase().contains('solicitud') ? Colors.orange : Colors.green,
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text("Configurar enlace"),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text("Generar enlace de descarga para este archivo."),
+                  const SizedBox(height: 15),
+                  CheckboxListTile(
+                    title: const Text("Proteger con contraseña"),
+                    value: usarPassword,
+                    onChanged: (val) => setDialogState(() => usarPassword = val!)
+                  ),
+                  if (usarPassword)
+                    TextField(
+                      decoration: const InputDecoration(labelText: "Contraseña", border: OutlineInputBorder()),
+                      onChanged: (val) => password = val,
+                    ),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<int>(
+                    value: expiracion,
+                    decoration: const InputDecoration(labelText: "Caducidad"),
+                    items: const [
+                      DropdownMenuItem(value: 0, child: Text("Nunca")),
+                      DropdownMenuItem(value: 1, child: Text("1 Día")),
+                      DropdownMenuItem(value: 7, child: Text("1 Semana")),
+                      DropdownMenuItem(value: 30, child: Text("1 Mes"))
+                    ],
+                    onChanged: (val) => setDialogState(() => expiracion = val!),
+                  ),
+                ],
+              ),
             ),
-          );
-        } else {
-           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(res['mensaje'] ?? 'Error al compartir'), backgroundColor: Colors.red),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancelar")),
+              ElevatedButton(
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  String? url = await _recursoApi.crearEnlacePublico(
+                    [recurso.id], 
+                    [], 
+                    usarPassword && password.isNotEmpty ? password : null, 
+                    expiracion
+                  );
+
+                  if (url != null && mounted) {
+                    _mostrarDialogoUrl(url);
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error creando enlace")));
+                  }
+                },
+                child: const Text("Generar"),
+              ),
+            ],
           );
         }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-        );
-      }
-    }
+      ),
+    );
+  }
+  void _mostrarDialogoUrl(String url) {
+    showDialog(
+      context: context, 
+      builder: (ctx) => AlertDialog(
+        title: const Text("¡Enlace listo!"), 
+        content: Column(
+          mainAxisSize: MainAxisSize.min, 
+          children: [ 
+            const Icon(Icons.check_circle, color: Colors.green, size: 50), 
+            const SizedBox(height: 10), 
+            SelectableText(url, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)), 
+            const SizedBox(height: 5), 
+            const Text("Copia este enlace y envíalo.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey))
+          ]
+        ), 
+        actions: [
+          ElevatedButton.icon(
+            icon: const Icon(Icons.copy), 
+            label: const Text("Copiar"), 
+            onPressed: () { 
+              Clipboard.setData(ClipboardData(text: url)); 
+              Navigator.pop(ctx); 
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Enlace copiado"))); 
+            }
+          ),
+          // Botón extra para compartir directamente el enlace generado
+          TextButton(
+            child: const Text("Compartir"),
+            onPressed: () {
+              Navigator.pop(ctx);
+              Share.share(url);
+            }
+          )
+        ]
+      )
+    );
   }
 
   void _descargarArchivo() async {
@@ -620,7 +720,7 @@ class _DetalleRecursoScreenState extends State<DetalleRecursoScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
-                        _buildActionButton(Icons.share, "Compartir", Colors.blue, _mostrarDialogoCompartir),
+                        _buildActionButton(Icons.share, "Compartir", Colors.blue, () => _mostrarDialogoCompartir(widget.recurso) ),
                         _buildActionButton(Icons.delete, "Eliminar", Colors.red, _borrarRecurso),
                         _buildActionButton(Icons.download, "Descargar", Colors.green, _descargarArchivo),
                       ],

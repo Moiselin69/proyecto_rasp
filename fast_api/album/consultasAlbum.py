@@ -48,24 +48,37 @@ def crear_album(nombre: str, descripcion:str, id_persona:int, id_album_padre: in
             if 'cursor' in locals(): cursor.close()
             connection.close()
 # Utilizado en el endpoint 2 de Album -------------------------------------------------------------
-def obtener_albumes_usuario(id_persona: int):
+def obtener_albumes_usuario(id_usuario: int):
     connection = None
     try:
         connection = db.get_connection()
-        cursor = connection.cursor(dictionary=True)
-        query = """
-            SELECT A.id, A.nombre, A.descripcion, A.fecha_creacion, A.id_album_padre, M.rol 
-            FROM Album A
-            JOIN Miembro_Album M ON A.id = M.id_album
-            WHERE M.id_persona = %s
-            ORDER BY A.fecha_creacion DESC;
-        """
-        cursor.execute(query, (id_persona,))
-        resultados = cursor.fetchall()
-        return (True, resultados)
-    except Exception as e:
-        print(f"Error en la consulta 'obtener_albumes_usuario': {e}")
-        return (False, str(e))
+        if connection.is_connected():
+            cursor = connection.cursor(dictionary=True)
+            # Obtenemos TODOS los álbumes donde soy miembro (Creador o Colaborador)
+            sql = """
+                SELECT A.id, A.nombre, A.descripcion, A.id_album_padre, A.fecha_creacion, MA.rol
+                FROM Album A
+                JOIN Miembro_Album MA ON A.id = MA.id_album
+                WHERE MA.id_persona = %s
+            """
+            cursor.execute(sql, (id_usuario,))
+            albumes = cursor.fetchall()
+            
+            # --- LÓGICA DE VISIBILIDAD EN RAÍZ ---
+            # Creamos un set con los IDs de mis álbumes para búsqueda rápida
+            mis_ids = {a['id'] for a in albumes}
+            
+            for album in albumes:
+                padre = album['id_album_padre']
+                # Si el álbum tiene padre, PERO yo no tengo acceso a ese padre (no está en mi lista),
+                # entonces para mí este álbum debe comportarse como una carpeta raíz.
+                if padre is not None and padre not in mis_ids:
+                    album['id_album_padre'] = None
+            
+            return (True, albumes)  # <--- CORRECCIÓN AQUÍ: Devuelve tupla
+    except Error as e:
+        print(f"Error obteniendo albumes: {e}")
+        return (False, str(e))      # <--- CORRECCIÓN AQUÍ: Devuelve tupla
     finally:
         if connection and connection.is_connected():
             cursor.close()
@@ -76,24 +89,36 @@ def obtener_recursos_album(id_album: int, id_persona: int):
     try:
         connection = db.get_connection()
         cursor = connection.cursor(dictionary=True)
-        # Paso 1: verificamos que la persona que quiere obtener los recursos del album es miembro del album
+        
+        # Paso 1: Verificar acceso al álbum
         check_query = "SELECT COUNT(*) as count FROM Miembro_Album WHERE id_album=%s AND id_persona=%s"
         cursor.execute(check_query, (id_album, id_persona))
         if cursor.fetchone()['count'] == 0:
             return (False, "No tienes acceso a este album")
-        # Paso 2: Realizamos la consulta para obtener los datos de los recursos a la base de datos
+            
+        # Paso 2: Obtener TODOS los recursos del álbum (sin importar quién los subió)
+        # Añadimos r.favorito y r.id_creador que suelen ser necesarios
         query = """
-            SELECT R.id, R.enlace, R.tipo, R.nombre, R.fecha_subida
+            SELECT R.id, R.tipo, R.nombre, R.fecha_subida, R.fecha_real, R.favorito, R.id_creador, RA.id_album
             FROM Recurso R
             JOIN Recurso_Album RA ON R.id = RA.id_recurso
-            WHERE RA.id_album = %s;
+            WHERE RA.id_album = %s AND R.fecha_eliminacion IS NULL
+            ORDER BY R.fecha_real DESC;
         """
         cursor.execute(query, (id_album,))
         resultados = cursor.fetchall()
+        
+        # CORRECCIÓN IMPORTANTE: Generar URLs para que Flutter las vea
+        for recurso in resultados:
+            recurso['url_visualizacion'] = f"/recurso/archivo/{recurso['id']}"
+            recurso['url_thumbnail'] = f"/recurso/archivo/{recurso['id']}?size=small"
+            # Ocultamos la ruta física del servidor
+            if 'enlace' in recurso: del recurso['enlace']
+            
         return (True, resultados)
     except Error as e:
-        print(f"Error en la consulta de 'obtener_recursos_album': {e}")
-        return (False, e)
+        print(f"Error en obtener_recursos_album: {e}")
+        return (False, str(e))
     finally:
         if connection and connection.is_connected():
             cursor.close()
