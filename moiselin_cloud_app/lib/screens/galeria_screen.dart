@@ -7,7 +7,8 @@ import 'package:flutter/services.dart';
 import 'package:wechat_assets_picker/wechat_assets_picker.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:share_plus/share_plus.dart'; 
-import 'selector_amigo_screen.dart';
+
+import '../main.dart';
 // --- SERVICIOS ---
 import '../services/api_service.dart'; // Para constantes estáticas y logout
 import '../services/recurso_api.dart'; // Servicio de recursos
@@ -28,6 +29,7 @@ import 'configuracion_screen.dart';
 import 'compartidos_screen.dart';
 import 'papelera_screen.dart';
 import 'admin_screen.dart';
+import 'selector_amigo_screen.dart';
 
 class GaleriaScreen extends StatefulWidget {
   final String token;
@@ -45,7 +47,7 @@ class GaleriaScreen extends StatefulWidget {
   _GaleriaScreenState createState() => _GaleriaScreenState();
 }
 
-class _GaleriaScreenState extends State<GaleriaScreen> {
+class _GaleriaScreenState extends State<GaleriaScreen> with RouteAware{
   // Instancias de servicios
   final ApiService _apiService = ApiService(); // Mantenemos para logout y configs
   final RecursoApiService _recursoApi = RecursoApiService();
@@ -78,6 +80,24 @@ class _GaleriaScreenState extends State<GaleriaScreen> {
   Set<int> _albumesSeleccionados = {};
 
   final List<String> _categorias = ["Todos", "Favoritos", "Imagen", "Videos", "Musica", "Otros"];
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    routeObserver.subscribe(this, ModalRoute.of(context)!);
+  }
+
+  @override
+  void dispose() {
+    routeObserver.unsubscribe(this);
+    super.dispose();
+  }
+
+  @override
+  void didPopNext() {
+    print("El usuario volvió a la galería, recargando...");
+    _cargarDatos();
+  }
 
   @override
   void initState() {

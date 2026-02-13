@@ -11,6 +11,8 @@ import 'services/api_service.dart';     // Configuración y Almacenamiento
 import 'services/persona_api.dart';     // Login
 import 'services/album_api.dart';       // Verificación de token (cargar datos)
 
+final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<void>>();
+
 class MyHttpOverrides extends HttpOverrides {
   @override
   HttpClient createHttpClient(SecurityContext? context) {
@@ -46,6 +48,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
+      navigatorObservers: [routeObserver],
       home: CheckAuthScreen(), 
     );
   }
