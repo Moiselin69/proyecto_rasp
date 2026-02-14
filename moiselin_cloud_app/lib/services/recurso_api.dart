@@ -285,14 +285,37 @@ class RecursoApiService {
   }
 
   // Endpoint 13: Borrar lote (Papelera)
-  Future<bool> borrarLote(List<int> ids) async {
+  Future<Map<String, dynamic>> borrarLote(List<int> ids) async {
     final uri = Uri.parse('$baseUrl/recurso/lote/papelera');
-    final response = await http.put(
-      uri,
-      headers: await _getHeaders(),
-      body: jsonEncode({'ids': ids})
-    );
-    return response.statusCode == 200;
+    
+    try {
+      final response = await http.put(
+        uri,
+        headers: await _getHeaders(),
+        body: jsonEncode({'ids': ids})
+      );
+
+      // Decodificamos la respuesta (sea éxito o error)
+      final data = jsonDecode(response.body);
+
+      if (response.statusCode == 200) {
+        return {
+          'exito': true, 
+          'mensaje': data['mensaje'] ?? 'Elementos movidos a la papelera'
+        };
+      } else {
+        // Aquí capturamos el 'detail' que manda Python (ej: "No tienes permisos...")
+        return {
+          'exito': false, 
+          'mensaje': data['detail'] ?? 'Error desconocido al borrar'
+        };
+      }
+    } catch (e) {
+      return {
+        'exito': false, 
+        'mensaje': 'Error de conexión: $e'
+      };
+    }
   }
 
   // Endpoint 14: Mover lote a álbum
@@ -411,5 +434,46 @@ class RecursoApiService {
     } catch (e) {
       return "Excepción: $e";
     }
+  }
+
+  Future<int> subirListaDeRecursos(List<File> archivos, int? idAlbumDestino, {Function(int, int)? onProgressGeneral}) async {
+    int subidos = 0;
+    int simultaneos = 5; // Lote de 3 archivos simultáneos
+
+    // Iteramos de 3 en 3
+    for (var i = 0; i < archivos.length; i += simultaneos) {
+      // Calcular fin del lote
+      var fin = (i + simultaneos < archivos.length) ? i + simultaneos : archivos.length;
+      var lote = archivos.sublist(i, fin);
+      List<String?> resultados = await Future.wait(
+        lote.map((archivo) => subirPorChunks(
+          archivo, 
+          _determinarTipo(archivo),
+          idAlbum: idAlbumDestino,
+        ))
+      );
+      for (var res in resultados) {
+        if (res != null && !res.startsWith("Error") && !res.startsWith("Excepción") && !res.startsWith("DUPLICADO")) {
+          subidos++;
+        }
+      }
+      if (onProgressGeneral != null) {
+        onProgressGeneral(fin, archivos.length);
+      }
+    }
+    return subidos;
+  }
+
+  // Helper privado para detectar tipo de archivo por extensión
+  String _determinarTipo(File archivo) {
+    String extension = path.extension(archivo.path).toLowerCase();
+    if (['.jpg', '.jpeg', '.png', '.gif', '.webp', '.heic'].contains(extension)) {
+      return 'IMAGEN';
+    } else if (['.mp4', '.mov', '.avi', '.mkv'].contains(extension)) {
+      return 'VIDEO';
+    } else if (['.mp3', '.wav', '.m4a'].contains(extension)) {
+      return 'AUDIO';
+    }
+    return 'ARCHIVO';
   }
 }

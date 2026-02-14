@@ -30,13 +30,18 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
   void _cargarPapelera() async {
     setState(() => _cargando = true);
     try {
-      // Usamos RecursoApiService (el token se gestiona internamente)
-      final lista = await _recursoApi.obtenerPapelera();
+      // 1. Obtenemos TODOS los recursos (activos + borrados)
+      // Como modificamos el backend para devolver todo, usamos la llamada estándar.
+      final todos = await _recursoApi.obtenerMisRecursos();
+      
+      // 2. Filtramos en el CLIENTE: Solo los que tienen fecha de eliminación
+      final borrados = todos.where((r) => r.estaEnPapelera).toList();
+
       if (mounted) {
         setState(() {
-          _recursosPapelera = lista;
+          _recursosPapelera = borrados;
           _cargando = false;
-          _seleccionados.clear(); // Limpiamos selección al recargar
+          _seleccionados.clear(); 
         });
       }
     } catch (e) {

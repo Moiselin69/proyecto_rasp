@@ -24,10 +24,7 @@ class MyHttpOverrides extends HttpOverrides {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   HttpOverrides.global = MyHttpOverrides();
-  
-  // Cargamos la URL base guardada antes de arrancar la app
   await ApiService.cargarUrl();
-  
   runApp(MyApp());
 }
 

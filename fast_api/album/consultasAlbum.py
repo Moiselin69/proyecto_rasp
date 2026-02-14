@@ -1,5 +1,6 @@
 from fast_api import db
 from mysql.connector import Error
+import os
 
 # Utilizado en el endpoint 1 de Album --------------------------------------------------------------
 def crear_album(nombre: str, descripcion:str, id_persona:int, id_album_padre: int = None):
@@ -56,7 +57,7 @@ def obtener_albumes_usuario(id_usuario: int):
             cursor = connection.cursor(dictionary=True)
             # Obtenemos TODOS los álbumes donde soy miembro (Creador o Colaborador)
             sql = """
-                SELECT A.id, A.nombre, A.descripcion, A.id_album_padre, A.fecha_creacion, MA.rol
+                SELECT A.id, A.nombre, A.descripcion, A.id_album_padre, A.fecha_creacion, MA.rol, A.fecha_eliminacion
                 FROM Album A
                 JOIN Miembro_Album MA ON A.id = MA.id_album
                 WHERE MA.id_persona = %s
@@ -230,21 +231,36 @@ def borrar_recurso_album(id_recurso: int, id_album: int, id_persona:int):
             if 'cursor' in locals(): cursor.close()
             connection.close()
 # Utilizado en el endpoint 7 de Album ---------------------------------------------------------------
-def salir_de_album(id_album: int, id_persona: int):
+def salir_de_album(id_album: int, id_usuario: int):
+    """
+    EJECUTADA POR COLABORADORES.
+    Simplemente te saca de la lista de miembros.
+    """
     connection = None
     try:
         connection = db.get_connection()
+        connection.autocommit = False
         cursor = connection.cursor()
-        cursor.callproc('salir_de_album', [id_album, id_persona])
+
+        # Verificar rol (opcional, pero bueno para seguridad)
+        cursor.execute("SELECT rol FROM Miembro_Album WHERE id_album=%s AND id_persona=%s", (id_album, id_usuario))
+        res = cursor.fetchone()
+        if res and res[0] == 'CREADOR':
+             return False, "El creador no puede 'salir'. Debe eliminar el álbum."
+
+        cursor.execute("DELETE FROM Miembro_Album WHERE id_album = %s AND id_persona = %s", (id_album, id_usuario))
+        
+        if cursor.rowcount == 0:
+            return False, "No eras miembro de este álbum"
+
         connection.commit()
-        return (True, "Has salido del album correctamente")
-    except Error as e:
-        print(f"Error en la consulta 'salir_de_album': {e}")
-        return (False, e)
+        return True, "Has salido del álbum correctamente."
+
+    except Exception as e:
+        if connection: connection.rollback()
+        return False, str(e)
     finally:
-        if connection and connection.is_connected():
-            cursor.close()
-            connection.close()
+        if connection: connection.close()
 # Utilizado en el endpoint 8 de Album --------------------------------------------------------------
 def ver_peticiones_pendientes_album(id_persona: int):
     connection = None
@@ -389,48 +405,89 @@ def mover_recurso_de_album(id_recurso: int, id_album_origen: int, id_album_desti
             cursor.close()
             connection.close()
 # Utilizado en el endpoint 13 de Album ---------------------------------------------------------------------
-def borrar_album_completo(id_album: int, id_persona: int):
+def eliminar_album_definitivamente(id_album: int, id_usuario: int):
+    """
+    EJECUTADA POR EL CREADOR TRAS CONFIRMAR LA ALERTA.
+    Borra el álbum, sus subcarpetas, y todos los recursos dentro (BD + Archivos físicos).
+    """
     connection = None
-    rutas_a_borrar = [] # Lista donde guardaremos los paths de los archivos a eliminar del disco
+    rutas_fisicas_a_borrar = []
+    
     try:
         connection = db.get_connection()
+        connection.autocommit = False
         cursor = connection.cursor()
-        check = "SELECT rol FROM Miembro_Album WHERE id_album=%s AND id_persona=%s"# 1. Verificar si es CREADOR
-        cursor.execute(check, (id_album, id_persona))
+
+        # 1. Verificar que es CREADOR
+        sql_rol = "SELECT rol FROM Miembro_Album WHERE id_album = %s AND id_persona = %s"
+        cursor.execute(sql_rol, (id_album, id_usuario))
         res = cursor.fetchone()
+        
         if not res or res[0] != 'CREADOR':
-            return (False, "Solo el creador puede eliminar la carpeta")
-        def _borrar_recursivamente(id_actual): # --- FUNCIÓN RECURSIVA INTERNA ---
-            cursor.execute("SELECT id FROM Album WHERE id_album_padre = %s", (id_actual,)) # A. Procesar sub-carpetas (primero los hijos)
-            hijos = cursor.fetchall()
-            for fila in hijos:
-                _borrar_recursivamente(fila[0])
-            cursor.execute("SELECT id_recurso FROM Recurso_Album WHERE id_album=%s", (id_actual,)) # B. Procesar recursos del álbum actual
-            recursos = cursor.fetchall()
-            for (id_rec,) in recursos:
-                cursor.execute("SELECT COUNT(*) FROM Recurso_Persona WHERE id_recurso=%s", (id_rec,)) # Antes de borrar, comprobamos si el archivo quedará huérfano (nadie más lo tiene)
-                count = cursor.fetchone()[0] # Si el contador es 1 (solo yo), al borrarme a mí, el archivo debe morir.
-                if count <= 1:
-                    # Recuperamos la ruta física para borrarlo luego
-                    cursor.execute("SELECT enlace FROM Recurso WHERE id=%s", (id_rec,))
-                    fila_recurso = cursor.fetchone()
-                    if fila_recurso:
-                        rutas_a_borrar.append(fila_recurso[0]) # Guardamos ruta original
-                cursor.execute("DELETE FROM Recurso_Persona WHERE id_recurso=%s AND id_persona=%s", (id_rec, id_persona)) # Borramos el permiso (el Trigger de SQL se encargará de borrar la fila de la tabla Recurso)
-            cursor.execute("DELETE FROM Recurso_Album WHERE id_album=%s", (id_actual,))  # C. Limpiar relaciones y borrar álbum
-            cursor.execute("DELETE FROM Miembro_Album WHERE id_album=%s", (id_actual,))
-            cursor.execute("DELETE FROM Peticion_Album WHERE id_album=%s", (id_actual,))
-            cursor.execute("DELETE FROM Album WHERE id=%s", (id_actual,))
-        _borrar_recursivamente(id_album)# 2. Iniciar recursividad
+            return False, "No tienes permiso de propietario para eliminar este álbum."
+
+        # 2. Obtener lista de TODOS los IDs de álbumes a borrar (Padre + Subcarpetas recursivas)
+        ids_albumes = _obtener_arbol_albumes(cursor, id_album)
+        ids_albumes.append(id_album) # Añadimos el álbum raíz
+        
+        # Convertir lista a string para SQL IN (...)
+        format_strings = ','.join(['%s'] * len(ids_albumes))
+        tuple_ids = tuple(ids_albumes)
+
+        # 3. Recolectar rutas de archivos físicos antes de borrar la BD
+        # Obtenemos los recursos que están en estos álbumes
+        sql_recursos = f"""
+            SELECT R.id, R.enlace 
+            FROM Recurso R
+            JOIN Recurso_Album RA ON R.id = RA.id_recurso
+            WHERE RA.id_album IN ({format_strings})
+        """
+        cursor.execute(sql_recursos, tuple_ids)
+        recursos = cursor.fetchall()
+        
+        ids_recursos = [r[0] for r in recursos]
+        rutas_fisicas_a_borrar = [r[1] for r in recursos if r[1]] # Guardamos rutas válidas
+
+        # 4. BORRADO EN CASCADA (Orden importante para evitar errores de FK)
+        
+        if ids_recursos:
+            recursos_fmt = ','.join(['%s'] * len(ids_recursos))
+            recursos_tuple = tuple(ids_recursos)
+
+            # A. Borrar relaciones de recursos
+            cursor.execute(f"DELETE FROM Recurso_Persona WHERE id_recurso IN ({recursos_fmt})", recursos_tuple)
+            cursor.execute(f"DELETE FROM Recurso_Album WHERE id_recurso IN ({recursos_fmt})", recursos_tuple)
+            # B. Borrar los recursos en sí
+            cursor.execute(f"DELETE FROM Recurso WHERE id IN ({recursos_fmt})", recursos_tuple)
+
+        # C. Borrar relaciones de álbumes (Miembros y Peticiones)
+        cursor.execute(f"DELETE FROM Miembro_Album WHERE id_album IN ({format_strings})", tuple_ids)
+        cursor.execute(f"DELETE FROM Peticion_Album WHERE id_album IN ({format_strings})", tuple_ids)
+        
+        # D. Borrar los álbumes (MySQL suele requerir borrar hijos antes que padres si no hay CASCADE, 
+        # pero al borrarlos por ID en lote suele funcionar si no hay restricciones cíclicas)
+        cursor.execute(f"DELETE FROM Album WHERE id IN ({format_strings})", tuple_ids)
+
         connection.commit()
-        # Devolvemos True y la LISTA DE ARCHIVOS 
-        return (True, rutas_a_borrar)
+
+        # 5. Borrado Físico (Solo si la transacción en BD fue exitosa)
+        count_borrados = 0
+        for ruta in rutas_fisicas_a_borrar:
+            try:
+                if os.path.exists(ruta):
+                    os.remove(ruta)
+                    count_borrados += 1
+            except Exception as e:
+                print(f"Warning borrando archivo {ruta}: {e}")
+
+        return True, f"Eliminado álbum y {count_borrados} archivos definitivamente."
+
     except Exception as e:
         if connection: connection.rollback()
-        print(f"Error borrando album: {e}")
-        return (False, str(e))
+        print(f"Error fatal eliminando álbum: {e}")
+        return False, f"Error interno: {str(e)}"
     finally:
-        if connection: 
+        if connection:
             cursor.close()
             connection.close()
 # Utilizado en el endpoint 14 de Album -------------------------------------------------------------
@@ -498,6 +555,17 @@ def hacer_rol_album(id_persona:int, id_persona_implicada:int, id_album:int ,nuev
             if 'cursor' in locals(): cursor.close()
             connection.close()
 
+def _obtener_arbol_albumes(cursor, id_padre):
+    """ Función auxiliar recursiva para obtener todos los IDs de subcarpetas """
+    ids = []
+    cursor.execute("SELECT id FROM Album WHERE id_album_padre = %s", (id_padre,))
+    hijos = cursor.fetchall()
+    
+    for (id_hijo,) in hijos:
+        ids.append(id_hijo)
+        ids.extend(_obtener_arbol_albumes(cursor, id_hijo))
+    
+    return ids
 
 
 

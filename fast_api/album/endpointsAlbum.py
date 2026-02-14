@@ -102,22 +102,21 @@ def mover_recurso_endpoint(datos: modeloDatosAlbum.MoverRecursoAlbum, current_us
 #~Endpoint 13. Usuario borra un album
 @router.delete("/album/borrar/{id_album}")
 def borrar_album_endpoint(id_album: int, current_user_id: int = Depends(funcionesSeguridad.get_current_user_id)):
-    exito, resultado = consultasAlbum.borrar_album_completo(id_album, current_user_id)
+    exito, resultado = consultasAlbum.eliminar_album_definitivamente(id_album, current_user_id)
     if not exito:
         raise HTTPException(status_code=400, detail=str(resultado))
-    conteo_borrados = 0
+    conteo = 0
     if isinstance(resultado, list):
-        for ruta_original in resultado:
+        for ruta in resultado:
             try:
-                if os.path.exists(ruta_original):
-                    os.remove(ruta_original)
-                    conteo_borrados += 1
-                ruta_thumbnail = ruta_original.replace("uploads", "thumbnails")
-                if os.path.exists(ruta_thumbnail):
-                    os.remove(ruta_thumbnail)
+                if os.path.exists(ruta): os.remove(ruta)
+                # Borrar thumb
+                ruta_thumb = ruta.replace("uploads", "thumbnails")
+                if os.path.exists(ruta_thumb): os.remove(ruta_thumb)
+                conteo += 1
             except Exception as e:
-                print(f"Error no crítico borrando archivo {ruta_original}: {e}")
-    return {"mensaje": f"Carpeta eliminada y {conteo_borrados} archivos borrados físicamente."}
+                print(f"Error borrando archivo físico: {e}")
+    return {"mensaje": f"Álbum eliminado definitivamente. {conteo} archivos liberados."}
 
 #~Endpoint 14. Usuario ve los miembros de un album
 @router.get("/album/miembros/{id_album}")

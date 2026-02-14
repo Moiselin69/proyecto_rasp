@@ -247,4 +247,20 @@ class AlbumApiService {
     return response.statusCode == 200;
   }
 
+  Future<bool> eliminarAlbumDefinitivo(String token, int idAlbum) async {
+  final response = await http.delete(
+    Uri.parse('${ApiService.baseUrl}/album/eliminar-definitivo/$idAlbum'),
+    headers: {
+      'Authorization': 'Bearer $token',
+    },
+  );
+
+  if (response.statusCode == 200) {
+    return true;
+  } else {
+    print("Error eliminar álbum definitivo: ${response.body}");
+    return false;
+  }
+}
+
 }

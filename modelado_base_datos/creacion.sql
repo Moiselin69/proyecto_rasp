@@ -85,6 +85,7 @@ CREATE TABLE Album(
     descripcion VARCHAR(300),
     id_album_padre INT NULL,
     fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    fecha_eliminacion DATETIME DEFAULT NULL,
     CONSTRAINT pk_album PRIMARY KEY(id),
     CONSTRAINT fk_album_padre FOREIGN KEY(id_album_padre) REFERENCES Album(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
@@ -211,25 +212,6 @@ BEGIN
     END IF;
 END //
 
-CREATE PROCEDURE salir_de_album(IN p_id_album INT, IN p_id_persona INT)
-BEGIN
-    DECLARE v_rol_usuario ENUM('CREADOR', 'ADMINISTRADOR', 'COLABORADOR');
-    DECLARE v_conteo_admins INT;
-    SELECT rol INTO v_rol_usuario FROM Miembro_Album WHERE id_album = p_id_album AND id_persona = p_id_persona;
-    DELETE FROM Miembro_Album WHERE id_album = p_id_album AND id_persona = p_id_persona;
-    IF v_rol_usuario IN ('CREADOR', 'ADMINISTRADOR') THEN
-        SELECT COUNT(*) INTO v_conteo_admins 
-        FROM Miembro_Album 
-        WHERE id_album = p_id_album AND rol IN ('ADMINISTRADOR', 'CREADOR');
-        IF v_conteo_admins = 0 THEN
-            UPDATE Miembro_Album SET rol = 'ADMINISTRADOR' WHERE id_album = p_id_album AND id_persona = 
-				( SELECT id_persona FROM 
-					(SELECT id_persona FROM Miembro_Album WHERE id_album = p_id_album ORDER BY fecha_union ASC LIMIT 1) AS subquery
-            	);
-        END IF;
-    END IF;
-END //
-
 CREATE PROCEDURE MoverAlbumSeguro(IN p_album_id INT, IN p_nuevo_padre_id INT,OUT p_resultado VARCHAR(255))
 BEGIN
     DECLARE v_padre_actual INT;
@@ -254,6 +236,51 @@ BEGIN
         UPDATE albumes SET album_padre_id = p_nuevo_padre_id WHERE id = p_album_id;
         SET p_resultado = 'OK';
     END IF;
+END //
+
+CREATE PROCEDURE salir_de_album(IN p_id_album INT, IN p_id_persona INT)
+BEGIN
+    DECLARE v_rol_usuario ENUM('CREADOR', 'ADMINISTRADOR', 'COLABORADOR');
+    DECLARE v_conteo_admins INT;
+    DECLARE v_miembros_restantes INT;
+
+    -- 1. Guardamos el rol antes de borrar, por si hay que promover a alguien
+    SELECT rol INTO v_rol_usuario 
+    FROM Miembro_Album 
+    WHERE id_album = p_id_album AND id_persona = p_id_persona;
+
+    -- 2. Eliminamos al usuario del álbum
+    DELETE FROM Miembro_Album 
+    WHERE id_album = p_id_album AND id_persona = p_id_persona;
+
+    -- 3. Comprobamos cuántas personas quedan (LÓGICA NUEVA)
+    SELECT COUNT(*) INTO v_miembros_restantes 
+    FROM Miembro_Album 
+    WHERE id_album = p_id_album;
+
+    IF v_miembros_restantes = 0 THEN
+        -- CASO A: Si no queda nadie, eliminamos el álbum por completo
+        -- (El ON DELETE CASCADE de la BBDD limpiará peticiones y otros datos vinculados)
+        DELETE FROM Album WHERE id = p_id_album;
+    ELSE
+        -- CASO B: Si queda gente, ejecutamos la lógica de herencia de administración
+        IF v_rol_usuario IN ('CREADOR', 'ADMINISTRADOR') THEN
+            SELECT COUNT(*) INTO v_conteo_admins 
+            FROM Miembro_Album 
+            WHERE id_album = p_id_album AND rol IN ('ADMINISTRADOR', 'CREADOR');
+            
+            -- Si no quedan administradores, el miembro más antiguo hereda el rol
+            IF v_conteo_admins = 0 THEN
+                UPDATE Miembro_Album 
+                SET rol = 'ADMINISTRADOR' 
+                WHERE id_album = p_id_album AND id_persona = 
+                    ( SELECT id_persona FROM 
+                        (SELECT id_persona FROM Miembro_Album WHERE id_album = p_id_album ORDER BY fecha_union ASC LIMIT 1) AS subquery
+                    );
+            END IF;
+        END IF;
+    END IF;
+
 END //
 
 DELIMITER ;	

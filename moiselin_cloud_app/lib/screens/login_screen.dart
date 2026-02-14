@@ -14,10 +14,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-  
-  // Instanciamos los servicios
-  final ApiService _apiService = ApiService(); 
-  final PersonaApiService _personaApi = PersonaApiService(); // <--- Instancia para auth
+  final ApiService _apiService = ApiService();
 
   bool _isLoading = false;
   bool _isObscure = true;
@@ -39,6 +36,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       // 1. Llamamos al login usando PersonaApiService
+      final _personaApi = PersonaApiService();
       String? token = await _personaApi.login(email, password);
 
       if (token != null) {

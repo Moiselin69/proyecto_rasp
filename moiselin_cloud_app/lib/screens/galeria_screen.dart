@@ -15,6 +15,7 @@ import '../services/recurso_api.dart'; // Servicio de recursos
 import '../services/album_api.dart';   // Servicio de álbumes
 import '../services/persona_api.dart'; // Servicio de usuarios/admin
 import '../services/download_service.dart';
+import '../services/upload_manager.dart';
 
 // --- MODELOS ---
 import '../models/recursos.dart';
@@ -30,6 +31,7 @@ import 'compartidos_screen.dart';
 import 'papelera_screen.dart';
 import 'admin_screen.dart';
 import 'selector_amigo_screen.dart';
+import 'upload_progress_screen.dart';
 
 class GaleriaScreen extends StatefulWidget {
   final String token;
@@ -47,7 +49,7 @@ class GaleriaScreen extends StatefulWidget {
   _GaleriaScreenState createState() => _GaleriaScreenState();
 }
 
-class _GaleriaScreenState extends State<GaleriaScreen> with RouteAware{
+class _GaleriaScreenState extends State<GaleriaScreen> with RouteAware, SingleTickerProviderStateMixin{
   // Instancias de servicios
   final ApiService _apiService = ApiService(); // Mantenemos para logout y configs
   final RecursoApiService _recursoApi = RecursoApiService();
@@ -73,13 +75,13 @@ class _GaleriaScreenState extends State<GaleriaScreen> with RouteAware{
   String _mensajeSubida = "Subiendo...";
   DateTimeRange? _rangoFechas;
   String _tipoFechaFiltro = 'real';
-  
-  // Selección Mixta
   bool _modoSeleccion = false;
   Set<int> _recursosSeleccionados = {};
   Set<int> _albumesSeleccionados = {};
-
   final List<String> _categorias = ["Todos", "Favoritos", "Imagen", "Videos", "Musica", "Otros"];
+  late AnimationController _blinkController;
+  late Animation<double> _blinkAnimation;
+  final UploadManager _uploadManager = UploadManager();
 
   @override
   void didChangeDependencies() {
@@ -95,7 +97,6 @@ class _GaleriaScreenState extends State<GaleriaScreen> with RouteAware{
 
   @override
   void didPopNext() {
-    print("El usuario volvió a la galería, recargando...");
     _cargarDatos();
   }
 
@@ -103,40 +104,31 @@ class _GaleriaScreenState extends State<GaleriaScreen> with RouteAware{
   void initState() {
     super.initState();
     _cargarDatos();
+    _blinkController = AnimationController(vsync: this,duration: const Duration(milliseconds: 800),);
+    _blinkAnimation = Tween<double>(begin: 1.0, end: 0.3).animate(_blinkController);
+    _uploadManager.addListener(_handleUploadStateChange);
     _checkAdmin();
   }
 
   void _cargarDatos() async {
     setState(() => _cargando = true);
     try {
-      // 1. Obtener los álbumes (esto se mantiene igual para ver subcarpetas)
       final albumes = await _albumApi.obtenerMisAlbumes(widget.token);
-
-      // 2. LÓGICA DE RECURSOS SEGÚN EL CONTEXTO
       List<Recurso> recursos;
-      
       if (widget.parentId != null) {
-        // ✅ CASO A: Estamos DENTRO de una carpeta. 
-        // Pedimos TODO el contenido del álbum (fotos tuyas + de otros)
         recursos = await _albumApi.verContenidoAlbum(widget.token, widget.parentId!);
       } else {
-        // ✅ CASO B: Estamos en el INICIO (Raíz).
-        // Pedimos tus recursos y los compartidos individualmente.
         recursos = await _recursoApi.obtenerMisRecursos();
       }
 
       if (mounted) {
         setState(() {
-          _albumesVisibles = albumes.where((a) => a.idAlbumPadre == widget.parentId).toList();
-          
-          // Si estamos en un álbum, el filtro local ya no es estrictamente necesario 
-          // porque la API ya nos da solo los de ese álbum, pero lo dejamos por seguridad.
+          _albumesVisibles = albumes.where((a) => a.idAlbumPadre == widget.parentId && !a.estaEnPapelera).toList();
           if (widget.parentId != null) {
-            _todosLosRecursos = recursos; 
+            _todosLosRecursos = recursos.where((r) => !r.estaEnPapelera) .toList(); 
           } else {
-            _todosLosRecursos = recursos.where((r) => r.idAlbumPadre == null).toList();
+            _todosLosRecursos = recursos.where((r) => r.idAlbumPadre == null && !r.estaEnPapelera).toList();
           }
-
           _aplicarFiltros();
           _cargando = false;
         });
@@ -145,6 +137,36 @@ class _GaleriaScreenState extends State<GaleriaScreen> with RouteAware{
       print("Error en _cargarDatos: $e");
       if (mounted) setState(() => _cargando = false);
     }
+  }
+
+  void _handleUploadStateChange() {
+    if (_uploadManager.isUploading) {
+      if (!_blinkController.isAnimating) _blinkController.repeat(reverse: true);
+    } else {
+      _blinkController.stop();
+      if(mounted) _blinkController.value = 1.0; // Reset opacidad
+      // Opcional: Recargar datos si terminó una subida
+      if (_uploadManager.tasks.any((t) => t.status == UploadStatus.completed)) {
+         _cargarDatos();
+      }
+    }
+    if (mounted) setState(() {}); 
+  }
+
+  void _handleUploadButton() {
+    // CASO 1: YA ESTÁ SUBIENDO -> IR A PANTALLA PROGRESO
+    if (_uploadManager.isUploading || _uploadManager.tasks.isNotEmpty) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => UploadProgressScreen(currentAlbumId: widget.parentId),
+        ),
+      );
+      return;
+    }
+
+    // CASO 2: NO ESTÁ SUBIENDO -> MOSTRAR TU MENÚ DE OPCIONES
+    _mostrarOpcionesSubida();
   }
 
   void _checkAdmin() async {
@@ -356,20 +378,50 @@ class _GaleriaScreenState extends State<GaleriaScreen> with RouteAware{
     if (confirm == true) {
       setState(() => _cargando = true);
       
-      // 1. Borrar Recursos (RecursoApi no necesita token aquí)
+      String mensajeFinal = "";
+      bool huboError = false;
+
+      // 1. Borrar Recursos
       if (_recursosSeleccionados.isNotEmpty) {
-        await _recursoApi.borrarLote(_recursosSeleccionados.toList());
+        final res = await _recursoApi.borrarLote(_recursosSeleccionados.toList());
+        
+        if (res['exito']) {
+          mensajeFinal = res['mensaje'];
+        } else {
+          // SI FALLA: Guardamos el error y marcamos flag
+          mensajeFinal = res['mensaje']; // "No tienes permisos..."
+          huboError = true;
+        }
       }
 
-      // 2. Borrar Álbumes (AlbumApi SÍ necesita token)
-      for (var id in _albumesSeleccionados) {
-        await _albumApi.borrarAlbum(widget.token, id);
+      // 2. Borrar Álbumes (Solo si no hubo error crítico antes)
+      if (!huboError) {
+        for (var id in _albumesSeleccionados) {
+          await _albumApi.borrarAlbum(widget.token, id);
+        }
       }
       
       if (mounted) {
-        _limpiarSeleccion();
-        _cargarDatos();
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Elementos movidos a la papelera")));
+        setState(() => _cargando = false); // Quitamos carga
+
+        if (!huboError) {
+          // ÉXITO
+          _limpiarSeleccion();
+          _cargarDatos();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(mensajeFinal.isEmpty ? "Elementos borrados" : mensajeFinal))
+          );
+        } else {
+          // ERROR (Rojo)
+          // No limpiamos selección para que el usuario vea qué falló
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(mensajeFinal), 
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 4),
+            )
+          );
+        }
       }
     }
   }
@@ -433,16 +485,79 @@ class _GaleriaScreenState extends State<GaleriaScreen> with RouteAware{
     });
   }
 
-  String _obtenerTipoArchivo(String pathArchivo) {
-    String ext = path.extension(pathArchivo).toLowerCase();
-    if (['.jpg', '.jpeg', '.png', '.gif', '.webp', '.heic', '.heif', '.bmp', '.tiff', '.tif'].contains(ext)) return 'IMAGEN';
-    if (['.mp4', '.mov', '.avi', '.mkv', '.m4v', '.3gp', '.wmv', '.flv', '.webm'].contains(ext)) return 'VIDEO';
-    if (['.mp3', '.wav', '.aac', '.flac', '.m4a', '.wma', '.ogg', '.aiff', '.caf'].contains(ext))return 'AUDIO';
-    return 'ARCHIVO';
-  }
-
   void _mostrarOpcionesSubida() {
-    showModalBottomSheet(context: context, isScrollControlled: true, shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))), builder: (ctx) => Padding(padding: const EdgeInsets.fromLTRB(20, 20, 20, 20), child: Column(mainAxisSize: MainAxisSize.min, children: [ Container(width: 40, height: 4, margin: const EdgeInsets.only(bottom: 20), decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))), const Text("¿Qué deseas subir?", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)), const SizedBox(height: 20), ListTile(leading: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.blue.withOpacity(0.1), shape: BoxShape.circle), child: const Icon(Icons.photo_library, color: Colors.blue)), title: const Text("Fotos y Vídeos"), subtitle: const Text("Galería (Permite borrar original)"), onTap: () { Navigator.pop(ctx); _subirDesdeGaleria(); }), const SizedBox(height: 10), ListTile(leading: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.orange.withOpacity(0.1), shape: BoxShape.circle), child: const Icon(Icons.insert_drive_file, color: Colors.orange)), title: const Text("Archivos"), subtitle: const Text("Documentos, PDF, Audio..."), onTap: () { Navigator.pop(ctx); _subirDesdeArchivos(); }), const SizedBox(height: 20)])));
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20))
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40, height: 4, margin: const EdgeInsets.only(bottom: 20),
+              decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))
+            ),
+            // He cambiado el texto de "¿Qué deseas subir?" a "¿Qué deseas añadir?" para que encaje mejor
+            const Text("¿Qué deseas añadir?", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 20),
+            
+            // --- OPCIÓN NUEVA: CREAR CARPETA ---
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: Colors.purple.withOpacity(0.1), shape: BoxShape.circle),
+                child: const Icon(Icons.create_new_folder, color: Colors.purple)
+              ),
+              title: const Text("Nueva Carpeta"),
+              subtitle: const Text("Crear un álbum para organizar"),
+              onTap: () {
+                Navigator.pop(ctx);
+                _mostrarCrearAlbumDialog(); // Esta función ya la tienes en tu código
+              }
+            ),
+            
+            const SizedBox(height: 10),
+
+            // --- OPCIÓN FOTOS ---
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: Colors.blue.withOpacity(0.1), shape: BoxShape.circle),
+                child: const Icon(Icons.photo_library, color: Colors.blue)
+              ),
+              title: const Text("Fotos y Vídeos"),
+              subtitle: const Text("Galería (Permite borrar original)"),
+              onTap: () {
+                Navigator.pop(ctx);
+                _subirDesdeGaleria();
+              }
+            ),
+            
+            const SizedBox(height: 10),
+            
+            // --- OPCIÓN ARCHIVOS ---
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: Colors.orange.withOpacity(0.1), shape: BoxShape.circle),
+                child: const Icon(Icons.insert_drive_file, color: Colors.orange)
+              ),
+              title: const Text("Archivos"),
+              subtitle: const Text("Documentos, PDF, Audio..."),
+              onTap: () {
+                Navigator.pop(ctx);
+                _subirDesdeArchivos();
+              }
+            ),
+            const SizedBox(height: 20)
+          ]
+        )
+      )
+    );
   }
 
   void _mostrarAlertaPermisos(String mensaje) {
@@ -450,53 +565,37 @@ class _GaleriaScreenState extends State<GaleriaScreen> with RouteAware{
   }
 
   Future<void> _subirDesdeGaleria() async {
-    final List<AssetEntity>? assets = await Navigator.push(context, MaterialPageRoute(builder: (context) => const SelectorFotosPropio(maxSelection: 100), fullscreenDialog: true));
+    // 1. Seleccionar fotos
+    final List<AssetEntity>? assets = await Navigator.push(
+      context, 
+      MaterialPageRoute(
+        builder: (context) => const SelectorFotosPropio(maxSelection: 100), 
+        fullscreenDialog: true
+      )
+    );
+    
     if (assets == null || assets.isEmpty) return;
 
-    bool borrarAlFinalizar = await ApiService.getBorrarAlSubir();
-    List<String> idsParaBorrar = []; 
-    int contadorDuplicados = 0;
-    
-    setState(() { _subiendo = true; _progreso = 0.0; });
-
-    for (int i = 0; i < assets.length; i++) {
-      AssetEntity asset = assets[i];
-      File? file = await asset.file;
-      if (file == null) continue;
-
-      String nombre = asset.title ?? "media_${DateTime.now().millisecondsSinceEpoch}";
-      if (!nombre.contains('.')) nombre += (asset.type == AssetType.video ? '.mp4' : '.jpg');
-      
-      if (mounted) setState(() => _mensajeSubida = "Subiendo ${i + 1} de ${assets.length}:\n$nombre");
-      
-      // RecursoApi (gestiona token interno)
-      String? res = await _recursoApi.subirPorChunks(
-        file,
-        asset.type == AssetType.video ? 'VIDEO' : 'IMAGEN',
-        idAlbum: widget.parentId,
-        reemplazar: false,
-        onProgress: (p) { if (mounted) setState(() => _progreso = p); },
+    // 2. Mostrar feedback rápido mientras procesamos
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Procesando ${assets.length} archivos para subir..."))
       );
-
-      if (res == "DUPLICADO") contadorDuplicados++;
-      if (res != null && !res.contains("Error") && borrarAlFinalizar) idsParaBorrar.add(asset.id);
     }
 
-    if (idsParaBorrar.isNotEmpty) {
-      if (mounted) setState(() => _mensajeSubida = "Limpiando galería...");
-      try {
-        await PhotoManager.editor.deleteWithIds(idsParaBorrar);
-      } catch (e) {
-        print("Error borrar lote: $e");
+    // 3. Convertir Assets a Files (asíncrono pero rápido)
+    List<File> archivosParaSubir = [];
+    for (var asset in assets) {
+      File? file = await asset.file;
+      if (file != null) {
+        archivosParaSubir.add(file);
       }
     }
-    
-    if (mounted) {
-      setState(() => _subiendo = false);
-      _cargarDatos();
-      String mensajeFinal = idsParaBorrar.isNotEmpty ? "Subida completa. Originales borrados." : "Subida completa.";
-      if (contadorDuplicados > 0) mensajeFinal = "Finalizado: ${assets.length - contadorDuplicados} subidos, $contadorDuplicados duplicados.";
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(mensajeFinal), backgroundColor: contadorDuplicados > 0 ? Colors.orange : Colors.green));
+
+    // 4. ¡LA CLAVE! Delegar al Manager
+    // Esto activa isUploading = true, inicia el parpadeo y la cola paralela
+    if (archivosParaSubir.isNotEmpty) {
+      _uploadManager.addFiles(archivosParaSubir, widget.parentId);
     }
   }
 
@@ -504,35 +603,26 @@ class _GaleriaScreenState extends State<GaleriaScreen> with RouteAware{
     final PermissionState ps = await PhotoManager.requestPermissionExtend();
     if (!ps.hasAccess) { _mostrarAlertaPermisos("Se requiere acceso a la galería."); return; }
     
-    FilePickerResult? result = await FilePicker.platform.pickFiles(allowMultiple: true);
+    FilePickerResult? result = await FilePicker.platform.pickFiles(
+      allowMultiple: true, 
+      type: FileType.any
+    );
+    
     if (result == null) return;
 
-    setState(() { _subiendo = true; _progreso = 0.0; });
+    // 3. Convertir a File
+    List<File> files = result.paths
+        .where((path) => path != null)
+        .map((path) => File(path!))
+        .toList();
 
-    List<PlatformFile> files = result.files;
-    for (int i = 0; i < files.length; i++) {
-      if (files[i].path == null) continue;
-      File file = File(files[i].path!);
-      String nombre = files[i].name;
-      String tipo = _obtenerTipoArchivo(file.path);
-
-      if (mounted) setState(() => _mensajeSubida = "Subiendo ${i+1}/${files.length}:\n$nombre");
-
-      // RecursoApi (gestiona token interno)
-      String? res = await _recursoApi.subirPorChunks(
-          file, tipo,
-          idAlbum: widget.parentId, reemplazar: false,
-          onProgress: (p) => setState(() => _progreso = p));
-
-      if (res != null && !res.contains("Error")) {
-         bool borrar = await ApiService.getBorrarAlSubir();
-         if (borrar) {
-           try { if (await file.exists()) await file.delete(); } catch (_) {}
-         }
-      }
+    // 4. Delegar al Manager
+    if (files.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Añadidos ${files.length} archivos a la cola."))
+      );
+      _uploadManager.addFiles(files, widget.parentId);
     }
-
-    if (mounted) { setState(() => _subiendo = false); _cargarDatos(); }
   }
 
   void _mostrarCrearAlbumDialog() {
@@ -600,21 +690,71 @@ class _GaleriaScreenState extends State<GaleriaScreen> with RouteAware{
 
   Widget _buildCarpeta(Album album) {
     final isSelected = _albumesSeleccionados.contains(album.id);
+    
     return GestureDetector(
       onLongPress: () => _toggleSeleccionAlbum(album.id),
       onTap: () {
-        if (_modoSeleccion) { _toggleSeleccionAlbum(album.id); } else {
-          Navigator.push(context, MaterialPageRoute(builder: (_) => GaleriaScreen(token: widget.token, parentId: album.id, nombreCarpeta: album.nombre)));
+        if (_modoSeleccion) {
+          _toggleSeleccionAlbum(album.id);
+        } else {
+          Navigator.push(
+            context, 
+            MaterialPageRoute(builder: (_) => GaleriaScreen(token: widget.token, parentId: album.id, nombreCarpeta: album.nombre))
+          );
         }
       },
       child: Stack(
         alignment: Alignment.center,
         children: [
           Container(
-            decoration: BoxDecoration(color: isSelected ? Colors.blue.withOpacity(0.1) : Colors.transparent, borderRadius: BorderRadius.circular(10), border: isSelected ? Border.all(color: Colors.blue, width: 2) : null),
-            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [ const Icon(Icons.folder, size: 60, color: Colors.amber), Padding(padding: const EdgeInsets.symmetric(horizontal: 4.0), child: Text(album.nombre, style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis, maxLines: 1))]),
+            decoration: BoxDecoration(
+              color: isSelected ? Colors.blue.withOpacity(0.1) : Colors.transparent, 
+              borderRadius: BorderRadius.circular(10), 
+              border: isSelected ? Border.all(color: Colors.blue, width: 2) : null
+            ),
+            // CORRECCIÓN AQUÍ: Usamos LayoutBuilder para que el icono se encoja si no cabe
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // Calculamos el tamaño disponible
+                double altoDisponible = constraints.maxHeight;
+                
+                // Le damos al icono un 60% del alto disponible, con un tope de 60px
+                double iconSize = altoDisponible * 0.6;
+                if (iconSize > 60) iconSize = 60;
+                if (iconSize < 24) iconSize = 24; // Mínimo de seguridad
+
+                // Calculamos tamaño de fuente proporcional (opcional, para que no se vea gigante)
+                double fontSize = iconSize * 0.25;
+                if (fontSize < 10) fontSize = 10;
+                if (fontSize > 14) fontSize = 14;
+
+                return Column(
+                  mainAxisAlignment: MainAxisAlignment.center, 
+                  children: [ 
+                    Icon(Icons.folder, size: iconSize, color: Colors.amber), 
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4.0), 
+                      child: Text(
+                        album.nombre, 
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: fontSize), 
+                        overflow: TextOverflow.ellipsis, // Esto pone los puntos suspensivos ...
+                        maxLines: 1,
+                        textAlign: TextAlign.center,
+                      )
+                    )
+                  ]
+                );
+              }
+            ),
           ),
-          if (_modoSeleccion) Positioned(top: 4, right: 4, child: isSelected ? const Icon(Icons.check_circle, color: Colors.blue, size: 24) : const Icon(Icons.radio_button_unchecked, color: Colors.grey, size: 24)),
+          if (_modoSeleccion) 
+            Positioned(
+              top: 4, 
+              right: 4, 
+              child: isSelected 
+                ? const Icon(Icons.check_circle, color: Colors.blue, size: 24) 
+                : const Icon(Icons.radio_button_unchecked, color: Colors.grey, size: 24)
+            ),
         ],
       ),
     );
@@ -623,100 +763,112 @@ class _GaleriaScreenState extends State<GaleriaScreen> with RouteAware{
   void _mostrarDialogoCompartir(List<int> idsRecursos, List<int> idsAlbumes) {
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      isScrollControlled: true, // Permite que se ajuste mejor al contenido
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20))
+      ),
       builder: (ctx) {
-        return Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text("Compartir selección", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 20),
-              
-              // OPCIÓN 1: APPS EXTERNAS (WhatsApp, Telegram...)
-              ListTile(
-                leading: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(color: Colors.green[100], shape: BoxShape.circle),
-                  child: const Icon(Icons.share, color: Colors.green),
-                ),
-                title: const Text("Enviar a otras apps"),
-                subtitle: const Text("WhatsApp, Instagram..."),
-                onTap: () async {
-                  Navigator.pop(ctx);
-                  // Creamos un enlace público temporal de 7 días para todo el lote
-                  final url = await _recursoApi.crearEnlacePublico(idsRecursos, idsAlbumes, null, 7);
-                  if (url != null) {
-                    // Importante: Asegúrate de importar 'package:share_plus/share_plus.dart' arriba
-                    Share.share("Te comparto estos archivos: $url"); 
-                  }
-                },
-              ),
-              
-              const Divider(),
-
-              // OPCIÓN 2: INTERNO (Amigos de la App) - AQUÍ ESTÁ EL CAMBIO PARA ÁLBUMES
-              ListTile(
-                leading: Container(
-                   padding: const EdgeInsets.all(10),
-                   decoration: BoxDecoration(color: Colors.blue[100], shape: BoxShape.circle),
-                   child: const Icon(Icons.people, color: Colors.blue),
-                ),
-                title: const Text("Compartir con amigo"),
-                subtitle: const Text("Usuarios de Moiselin Cloud"),
-                onTap: () async {
-                  Navigator.pop(ctx);
+        // CORRECCIÓN: Añadimos SingleChildScrollView y SafeArea
+        return SafeArea(
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Una pequeña barra gris para indicar que se puede deslizar (opcional pero estético)
+                  Container(
+                    width: 40, height: 4, margin: const EdgeInsets.only(bottom: 20),
+                    decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))
+                  ),
                   
-                  // 1. Abrimos el Buscador de Amigos
-                  final idAmigo = await Navigator.push(context, MaterialPageRoute(builder: (_) => SelectorAmigoScreen(token: widget.token)));
+                  const Text("Compartir selección", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 20),
                   
-                  if (idAmigo != null) {
-                    int exitos = 0;
-                    int errores = 0;
-
-                    // A. COMPARTIR RECURSOS (Archivos sueltos)
-                    for(int idR in idsRecursos) {
-                       final bool exito = await _recursoApi.compartirRecurso(idR, idAmigo);
-                       if (exito) exitos++; else errores++;
-                    }
-
-                    // B. COMPARTIR ÁLBUMES (Carpetas) <--- ESTO ES LO NUEVO
-                    for(int idA in idsAlbumes) {
-                       // Invitamos al amigo al álbum como COLABORADOR
-                       final res = await _albumApi.invitarAAlbum(widget.token, idA, idAmigo, 'COLABORADOR');
-                       if(res['exito'] == true) exitos++; else errores++;
-                    }
-
-                    if (mounted) {
-                      if (errores == 0 && exitos > 0) {
-                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Todo compartido correctamente"), backgroundColor: Colors.green));
-                      } else if (exitos > 0 && errores > 0) {
-                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Algunos elementos ya estaban compartidos o fallaron"), backgroundColor: Colors.orange));
-                      } else if (exitos == 0 && errores > 0) {
-                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error: Ya compartido o sin permisos"), backgroundColor: Colors.red));
+                  // OPCIÓN 1: APPS EXTERNAS
+                  ListTile(
+                    leading: Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(color: Colors.green[100], shape: BoxShape.circle),
+                      child: const Icon(Icons.share, color: Colors.green),
+                    ),
+                    title: const Text("Enviar a otras apps"),
+                    subtitle: const Text("WhatsApp, Instagram..."),
+                    onTap: () async {
+                      Navigator.pop(ctx);
+                      final url = await _recursoApi.crearEnlacePublico(idsRecursos, idsAlbumes, null, 7);
+                      if (url != null) {
+                        Share.share("Te comparto estos archivos: $url"); 
                       }
-                    }
-                  }
-                },
-              ),
+                    },
+                  ),
+                  
+                  const Divider(),
 
-              const Divider(),
+                  // OPCIÓN 2: INTERNO
+                  ListTile(
+                    leading: Container(
+                       padding: const EdgeInsets.all(10),
+                       decoration: BoxDecoration(color: Colors.blue[100], shape: BoxShape.circle),
+                       child: const Icon(Icons.people, color: Colors.blue),
+                    ),
+                    title: const Text("Compartir con amigo"),
+                    subtitle: const Text("Usuarios de Moiselin Cloud"),
+                    onTap: () async {
+                      Navigator.pop(ctx);
+                      final idAmigo = await Navigator.push(context, MaterialPageRoute(builder: (_) => SelectorAmigoScreen(token: widget.token)));
+                      
+                      if (idAmigo != null) {
+                        int exitos = 0;
+                        int errores = 0;
 
-              // OPCIÓN 3: ENLACE PÚBLICO AVANZADO (Descarga)
-              ListTile(
-                leading: Container(
-                   padding: const EdgeInsets.all(10),
-                   decoration: BoxDecoration(color: Colors.orange[100], shape: BoxShape.circle),
-                   child: const Icon(Icons.link, color: Colors.orange),
-                ),
-                title: const Text("Crear enlace de descarga"),
-                subtitle: const Text("Con contraseña o expiración"),
-                onTap: () {
-                   Navigator.pop(ctx);
-                   _mostrarDialogoConfigurarEnlace(idsRecursos, idsAlbumes);
-                },
+                        // A. COMPARTIR RECURSOS
+                        for(int idR in idsRecursos) {
+                           final bool exito = await _recursoApi.compartirRecurso(idR, idAmigo);
+                           if (exito) exitos++; else errores++;
+                        }
+
+                        // B. COMPARTIR ÁLBUMES
+                        for(int idA in idsAlbumes) {
+                           final res = await _albumApi.invitarAAlbum(widget.token, idA, idAmigo, 'COLABORADOR');
+                           if(res['exito'] == true) exitos++; else errores++;
+                        }
+
+                        if (mounted) {
+                          if (errores == 0 && exitos > 0) {
+                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Todo compartido correctamente"), backgroundColor: Colors.green));
+                          } else if (exitos > 0 && errores > 0) {
+                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Algunos elementos ya estaban compartidos o fallaron"), backgroundColor: Colors.orange));
+                          } else if (exitos == 0 && errores > 0) {
+                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error: Ya compartido o sin permisos"), backgroundColor: Colors.red));
+                          }
+                        }
+                      }
+                    },
+                  ),
+
+                  const Divider(),
+
+                  // OPCIÓN 3: ENLACE PÚBLICO
+                  ListTile(
+                    leading: Container(
+                       padding: const EdgeInsets.all(10),
+                       decoration: BoxDecoration(color: Colors.orange[100], shape: BoxShape.circle),
+                       child: const Icon(Icons.link, color: Colors.orange),
+                    ),
+                    title: const Text("Crear enlace de descarga"),
+                    subtitle: const Text("Con contraseña o expiración"),
+                    onTap: () {
+                       Navigator.pop(ctx);
+                       _mostrarDialogoConfigurarEnlace(idsRecursos, idsAlbumes);
+                    },
+                  ),
+                  
+                  // Espacio extra al final para evitar cortes con bordes curvos o gestos
+                  const SizedBox(height: 20),
+                ],
               ),
-            ],
+            ),
           ),
         );
       }
@@ -1015,7 +1167,23 @@ void _mostrarDialogoUrl(String url) {
             ),
         ],
       ),
-      floatingActionButton: Column(mainAxisAlignment: MainAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [FloatingActionButton(heroTag: "btnFolder", backgroundColor: Colors.amber, onPressed: _cargando ? null : _mostrarCrearAlbumDialog, child: const Icon(Icons.create_new_folder)), const SizedBox(height: 10), FloatingActionButton(heroTag: "btnFile", onPressed: _cargando ? null : _mostrarOpcionesSubida, child: _cargando ? const CircularProgressIndicator(color: Colors.white) : const Icon(Icons.file_upload))]),
+      floatingActionButton: AnimatedBuilder(
+        animation: _blinkAnimation,
+        builder: (context, child) {
+          return Opacity(
+            opacity: _uploadManager.isUploading ? _blinkAnimation.value : 1.0,
+            child: FloatingActionButton(
+              onPressed: _handleUploadButton,
+              // El color SÍ usa Colors
+              backgroundColor: _uploadManager.isUploading ? Colors.orange : Colors.blue,
+              // EL ERROR ESTABA AQUÍ: Usamos Icons.upload_file (no Colors)
+              child: Icon(
+                _uploadManager.isUploading ? Icons.upload_file : Icons.add,
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }

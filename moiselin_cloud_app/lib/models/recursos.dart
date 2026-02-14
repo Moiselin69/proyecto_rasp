@@ -11,6 +11,7 @@ class Recurso {
   final String? nombreEmisor;
   final String? apellidosEmisor;
   final DateTime? fechaCompartido;
+  final DateTime? fechaEliminacion;
   bool favorito;
 
   Recurso({
@@ -27,6 +28,7 @@ class Recurso {
     this.apellidosEmisor,
     this.fechaCompartido,
     this.favorito = false,
+    this.fechaEliminacion,
   });
 
   factory Recurso.fromJson(Map<String, dynamic> json) {
@@ -66,11 +68,15 @@ class Recurso {
           ? DateTime.tryParse(json['fecha_compartido'].toString())
           : null,
       favorito: json['favorito'] == 1 || json['favorito'] == true,
+      fechaEliminacion: json['fecha_eliminacion'] != null 
+          ? DateTime.parse(json['fecha_eliminacion']) 
+          : null
     );
   }
 
   bool get esImagen => tipo == 'IMAGEN';
   bool get esVideo => tipo == 'VIDEO';
+  bool get estaEnPapelera => fechaEliminacion != null;
   
   String getUrlCompleta(String baseUrl, {bool usarThumbnail = false}) {
     final ruta = usarThumbnail ? urlThumbnail : urlVisualizacion;

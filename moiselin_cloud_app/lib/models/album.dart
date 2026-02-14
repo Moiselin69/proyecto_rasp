@@ -5,6 +5,7 @@ class Album {
   final DateTime fechaCreacion;
   final int? idAlbumPadre;
   final String rol; // "CREADOR", "ADMINISTRADOR", "COLABORADOR"
+  final DateTime? fechaEliminacion;
 
   Album({
     required this.id,
@@ -13,6 +14,8 @@ class Album {
     required this.fechaCreacion,
     this.idAlbumPadre,
     required this.rol,
+    this.fechaEliminacion
+    
   });
 
   factory Album.fromJson(Map<String, dynamic> json) {
@@ -23,9 +26,13 @@ class Album {
       fechaCreacion: DateTime.parse(json['fecha_creacion']),
       idAlbumPadre: json['id_album_padre'], 
       rol: json['rol'] ?? 'COLABORADOR',
+      fechaEliminacion: json['fecha_eliminacion'] != null 
+          ? DateTime.parse(json['fecha_eliminacion']) 
+          : null
     );
   }
 
   bool get soyCreador => rol == 'CREADOR';
   bool get soyAdmin => rol == 'ADMINISTRADOR' || rol == 'CREADOR';
+  bool get estaEnPapelera => fechaEliminacion != null;
 }

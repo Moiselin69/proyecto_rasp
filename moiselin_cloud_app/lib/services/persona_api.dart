@@ -5,7 +5,7 @@ import "../services/api_service.dart";
 import '../models/persona.dart';
 
 class PersonaApiService {
-  final String baseUrl = ApiService.baseUrl;
+  String get baseUrl => ApiService.baseUrl;
   final _storage = const FlutterSecureStorage();
 
   // Helper para obtener cabeceras con token

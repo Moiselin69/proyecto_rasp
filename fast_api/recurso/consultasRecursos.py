@@ -29,22 +29,22 @@ def obtener_recursos(id_persona: int):
             # 1. Recursos propios (Recurso_Persona)
             # 2. Recursos compartidos conmigo (Recurso_Compartido)
             query = """
-                SELECT id, tipo, nombre, fecha_real, fecha_subida, favorito, id_album_padre 
+                SELECT id, tipo, nombre, fecha_real, fecha_subida, favorito, id_album_padre, fecha_eliminacion
                 FROM (
                     -- TUS RECURSOS
-                    SELECT r.id, r.tipo, r.nombre, r.fecha_real, r.fecha_subida, r.favorito, ra.id_album as id_album_padre
+                    SELECT r.id, r.tipo, r.nombre, r.fecha_real, r.fecha_subida, r.favorito, ra.id_album as id_album_padre, r.fecha_eliminacion
                     FROM Recurso r 
                     JOIN Recurso_Persona rp ON r.id = rp.id_recurso 
                     LEFT JOIN Recurso_Album ra ON r.id = ra.id_recurso
-                    WHERE rp.id_persona = %s AND r.fecha_eliminacion IS NULL
+                    WHERE rp.id_persona = %s 
                     
                     UNION
                     
                     -- RECURSOS COMPARTIDOS CONTIGO
-                    SELECT r.id, r.tipo, r.nombre, r.fecha_real, r.fecha_subida, r.favorito, NULL as id_album_padre
+                    SELECT r.id, r.tipo, r.nombre, r.fecha_real, r.fecha_subida, r.favorito, NULL as id_album_padre, r.fecha_eliminacion
                     FROM Recurso r
                     JOIN Recurso_Compartido rc ON r.id = rc.id_recurso
-                    WHERE rc.id_receptor = %s AND r.fecha_eliminacion IS NULL
+                    WHERE rc.id_receptor = %s 
                 ) AS TodosRecursos
                 ORDER BY fecha_real DESC
             """
@@ -56,9 +56,7 @@ def obtener_recursos(id_persona: int):
             for recurso in recursos:
                 recurso['url_visualizacion'] = f"/recurso/archivo/{recurso['id']}"
                 recurso['url_thumbnail'] = f"/recurso/archivo/{recurso['id']}?size=small"
-                # Añadimos flag para distinguir en el frontend si es necesario
                 recurso['es_compartido'] = False # Por defecto, la lógica de Flutter no lo distingue visualmente, se mezclan.
-            
             return (True, recursos)
     except Error as e:
         print(f"Error en obtener recursos: {e}")
@@ -517,35 +515,99 @@ def restaurar_recurso_bd(id_recurso: int, id_usuario: int) -> Tuple[bool, Any]:
         if connection and connection.is_connected(): connection.close()
 
 def mover_a_papelera_lote(ids: List[int], id_usuario: int) -> Tuple[bool, str]:
-    """Mueve una lista de recursos a la papelera en una sola transacción."""
+    """
+    Gestión inteligente de borrado por lotes:
+    1. Si eres DUEÑO del recurso -> Mueve a papelera (Soft Delete).
+    2. Si NO eres dueño, pero eres CREADOR/ADMIN del álbum donde está -> Lo elimina del álbum.
+    3. Si es un recurso compartido contigo -> Dejas de seguirlo (Recurso_Compartido).
+    """
     connection = None
     try:
         connection = db.get_connection()
         connection.autocommit = False 
         cursor = connection.cursor()
         
-        # Convertimos la lista de ints a string para SQL: (1, 2, 3)
-        # Usamos placeholders %s para seguridad
+        if not ids:
+            return False, "No hay IDs para procesar"
+
+        # Placeholders para la lista de IDs (%s, %s, %s...)
         format_strings = ','.join(['%s'] * len(ids))
         
-        # Query masiva
-        query = f"""
-            UPDATE Recurso 
-            SET fecha_eliminacion = NOW() 
-            WHERE id IN ({format_strings}) AND id_creador = %s
-        """
+        # --- PASO 1: Identificar recursos PROPIOS (Eres el creador del recurso) ---
+        query_owner = f"SELECT id FROM Recurso WHERE id IN ({format_strings}) AND id_creador = %s"
+        cursor.execute(query_owner, tuple(ids) + (id_usuario,))
         
-        # Pasamos los IDs + el id_usuario al final
-        valores = tuple(ids) + (id_usuario,)
+        # Obtenemos lista limpia de IDs propios
+        resultados_propios = cursor.fetchall()
+        ids_propio = [r[0] for r in resultados_propios]
         
-        cursor.execute(query, valores)
-        filas_afectadas = cursor.rowcount
+        # Ejecutar Soft Delete para los propios
+        count_propio = 0
+        if ids_propio:
+            fmt_propio = ','.join(['%s'] * len(ids_propio))
+            cursor.execute(f"UPDATE Recurso SET fecha_eliminacion = NOW() WHERE id IN ({fmt_propio})", tuple(ids_propio))
+            count_propio = cursor.rowcount
+
+        # --- PASO 2: Procesar los AJENOS (No eres el creador) ---
+        # Calculamos cuáles son los ajenos restando los propios a la lista total
+        ids_ajenos = list(set(ids) - set(ids_propio))
         
+        count_album = 0
+        count_compartido = 0
+        
+        ids_procesados_en_album = set()
+
+        if ids_ajenos:
+            fmt_ajenos = ','.join(['%s'] * len(ids_ajenos))
+            
+            # A. Revisar si están en un ÁLBUM donde tengo permisos de ADMIN/CREADOR
+            # CORRECCIÓN: Usamos solo Miembro_Album para verificar permisos
+            query_album_perms = f"""
+                SELECT RA.id_recurso, RA.id_album
+                FROM Recurso_Album RA
+                JOIN Miembro_Album MA ON RA.id_album = MA.id_album
+                WHERE RA.id_recurso IN ({fmt_ajenos})
+                AND MA.id_persona = %s
+                AND MA.rol IN ('CREADOR', 'ADMIN')
+            """
+            
+            # El orden de parámetros es: (ids_ajenos..., id_usuario)
+            params_album = tuple(ids_ajenos) + (id_usuario,)
+            cursor.execute(query_album_perms, params_album)
+            
+            enlaces_a_borrar = cursor.fetchall()
+            
+            # Borramos la relación Recurso-Album (Sacar de la carpeta)
+            for rid, aid in enlaces_a_borrar:
+                # Al borrar esto, el recurso queda "huérfano" de carpeta y vuelve al inicio del dueño original
+                cursor.execute("DELETE FROM Recurso_Album WHERE id_recurso = %s AND id_album = %s", (rid, aid))
+                ids_procesados_en_album.add(rid)
+                count_album += 1
+            
+            # B. Revisar si son COMPARTIDOS (Recurso_Compartido) - "Dejar de seguir"
+            # Solo procesamos los que NO se hayan eliminado ya de un álbum en el paso anterior
+            ids_restantes = list(set(ids_ajenos) - ids_procesados_en_album)
+            
+            if ids_restantes:
+                fmt_rest = ','.join(['%s'] * len(ids_restantes))
+                query_viewer = f"DELETE FROM Recurso_Compartido WHERE id_recurso IN ({fmt_rest}) AND id_receptor = %s"
+                cursor.execute(query_viewer, tuple(ids_restantes) + (id_usuario,))
+                count_compartido = cursor.rowcount
+                
+                # C. VERIFICACIÓN FINAL: ¿Quedó algo sin poder borrar?
+                # Si había IDs restantes y no se borraron de compartidos, es que el usuario no tenía permiso.
+                if count_compartido < len(ids_restantes):
+                    connection.rollback() 
+                    return False, "Error: No tienes permisos para eliminar algunos recursos (no eres dueño ni administrador)."
+
         connection.commit()
-        return True, f"{filas_afectadas} archivos movidos a la papelera"
         
-    except Error as e:
+        total = count_propio + count_album + count_compartido
+        return True, f"Procesados: {count_propio} a papelera, {count_album} sacados de álbum, {count_compartido} dejados de seguir."
+        
+    except Exception as e:
         if connection: connection.rollback()
+        print(f"Error mover lote papelera: {e}")
         return False, str(e)
     finally:
         if connection: connection.close()
@@ -645,8 +707,6 @@ def procesar_archivo_local(id_usuario: int, ruta_fisica: str, nombre_original: s
             metadatos_extraidos = utilidadesMetadatos.obtener_exif(ruta_fisica)
             if metadatos_extraidos and metadatos_extraidos.get("fecha"):
                 fecha = metadatos_extraidos['fecha']
-            else:
-                print("No tiene fecha")
         except Exception as e:
             print(f"Error extrayendo metadatos en chunk upload: {e}")
     # 5. Guardar en BD
@@ -654,8 +714,7 @@ def procesar_archivo_local(id_usuario: int, ruta_fisica: str, nombre_original: s
         # En caso de reemplazo, usamos el ID existente
         exito, resultado = reemplazar_recurso_simple(id_existente, ruta_fisica, tipo, tamano, fecha, id_usuario)
         if exito and metadatos_extraidos:
-             # Opcional: Podrías borrar metadatos viejos antes, pero para v1 insertamos los nuevos
-             guardar_metadatos(id_existente, metadatos_extraidos)
+            guardar_metadatos(id_existente, metadatos_extraidos)
         return exito, resultado
     else:
         # Caso nuevo recurso
@@ -860,7 +919,7 @@ def reemplazar_recurso_simple(id_recurso: int, nuevo_enlace: str, nuevo_tipo: st
         # Actualizamos Hash también
         sql_update = """
             UPDATE Recurso 
-            SET enlace = %s, tipo = %s, tamano = %s, fecha_real = %s, hash_archivo = %s, fecha_subida = NOW(), fecha_eliminacion = NULL
+            SET enlace = %s, tipo = %s, tamano = %s, fecha_real = %s, fecha_subida = NOW(), fecha_eliminacion = NULL
             WHERE id = %s AND id_creador = %s
         """
         cursor.execute(sql_update, (nuevo_enlace, nuevo_tipo, nuevo_tamano, nueva_fecha_real, id_recurso, id_usuario))
@@ -870,6 +929,7 @@ def reemplazar_recurso_simple(id_recurso: int, nuevo_enlace: str, nuevo_tipo: st
 
     except Error as e:
         if connection: connection.rollback()
+        print(e)
         return False, str(e)
     finally:
         if connection: connection.close()
